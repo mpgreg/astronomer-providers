@@ -1,10 +1,15 @@
 from __future__ import annotations
+import inspect
+import sys
+from textwrap import dedent
 
 import typing
 from datetime import timedelta
-from typing import Any, Callable, List
+from typing import Any, Callable, List, Collection, Iterable, Mapping
 
 from airflow.exceptions import AirflowException
+from airflow.utils.context import Context, context_copy_partial
+from airflow.operators.python import _BasePythonVirtualenvOperator
 
 try:
     from airflow.providers.snowflake.operators.snowflake import SnowflakeOperator
@@ -19,6 +24,7 @@ except ImportError:  # pragma: no cover
 from astronomer.providers.snowflake.hooks.snowflake import (
     SnowflakeHookAsync,
     fetch_all_snowflake_handler,
+    SnowServicesHook,
 )
 from astronomer.providers.snowflake.hooks.snowflake_sql_api import (
     SnowflakeSqlApiHookAsync,
@@ -366,3 +372,173 @@ class SnowflakeSqlApiOperatorAsync(SnowflakeOperator):
                 self.log.info("%s completed successfully.", self.task_id)
         else:
             self.log.info("%s completed successfully.", self.task_id)
+
+class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
+    """
+    Runs a function in a Snowservices service runner environment.  Provided dependencies 
+    will be installed and attempts will be made to reuse python environements across tasks 
+    within a dag.
+
+    The function must be defined using def, and not be part of a class. All imports must 
+    happen inside the function and no variables outside the scope may be referenced. All arguments to 
+    the function must be passed in the function signature. string_args, args and kwargs will not be passed.
+    
+    Task XCOMs will be saved in a Snowflake stage and return values to Airflow (plain xcom) will list 
+    this stage location and filename (ie. @mystage/path/file).
+
+    :param snowflake_conn_id: connection to use when running code within the Snowservices runner.
+    :type snowflake_conn_id: str  (default is snowflake_default)
+    :param runner_endpoint: URL endpoint of the instantiated snowservice runner
+    :type runner_endpoint: str
+    :param python_callable: A reference to an object that is callable
+    :param python: 'virtualenv' or a path to an existing python executable.  'virtualenv' will cause the 
+        snowservice runner to use PythonVirtualenvOperator.  Any other string will be interpreted as a python 
+        path for ExternalPythonOperator.
+    :param python_version: Python version to build if using 'virtualenv'. If set to None the runner will try to build 
+    a virtualenv based on the python version of the Airflow scheduler.  If 'python' param is not 'virtualenv' python_version is ignored.
+    :param requirements: Optional list of python dependencies or a path to a requirements.txt file to be installed for the callable.
+    :type requirements: list | str
+    :param includes: Optional list of dictionaries of github repositories to include as dependencies.
+    Format: [{'type': 'git', 'name': '', 'git': {'vendor': '', 'repo': '', 'branch': '', 'sha': '', 'token': ''}}]
+    :type includes: list
+    :param op_kwargs: a dictionary of keyword arguments that will get unpacked in your function (templated)
+    :param op_args: a list of positional arguments that will get unpacked when calling your callable (templated)
+    :param string_args: Strings that are present in the global var virtualenv_string_args,
+        available to python_callable at runtime as a list[str]. Note that args are split
+        by newline.
+    :param templates_dict: a dictionary where the values are templates that
+        will get templated by the Airflow engine sometime between
+        ``__init__`` and ``execute`` takes place and are made available
+        in your callable's context after the template has been applied
+    :param templates_exts: a list of file extensions to resolve while
+        processing templated fields, for examples ``['.sql', '.hql']``
+    :param expect_airflow: expect Airflow to be installed in the target environment. If true, the operator
+        will raise warning if Airflow is not installed, and it will attempt to load Airflow
+        macros when starting.
+    """
+
+    #template_fields: Sequence[str] = tuple({"python"} | set(PythonOperator.template_fields))
+
+    def __init__(
+        self,
+        *,
+        snowflake_conn_id: str = 'snowflake_default',
+        runner_endpoint: str, 
+        python_callable: Callable,
+        python: str = 'virtualenv',
+        python_version: str | None = None,
+        requirements: None | Iterable[str] | str = None,
+        use_dill: bool = False,
+        system_site_packages: bool = True,
+        pip_install_options: list[str] | None = None,
+        op_args: Collection[Any] | None = None,
+        op_kwargs: Mapping[str, Any] | None = None,
+        string_args: Iterable[str] | None = None,
+        templates_dict: dict | None = None,
+        templates_exts: list[str] | None = None,
+        expect_airflow: bool = True,
+        expect_pendulum: bool = False,
+        **kwargs,
+    ):
+
+        if not requirements:
+            self.requirements: list[str] | str = []
+        elif isinstance(requirements, str):
+            try: 
+                with open(requirements, 'r') as requirements_file:
+                    self.requirements = requirements_file.read().splitlines()
+            except:
+                raise FileNotFoundError(f'Specified requirements file {requirements} does not exist or is not readable.')
+        else:
+            self.requirements = list(requirements)
+        
+        self.system_site_packages = system_site_packages
+        self.pip_install_options = pip_install_options
+        self.snowflake_conn_id = snowflake_conn_id
+        self.venv_python_version = python_version
+        self.source_python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        self.use_dill = use_dill
+        self.hook = SnowServicesHook(conn_id=self.snowflake_conn_id)
+        self.snowflake_connection_uri = self.hook.get_uri()
+        self.target_python = python
+        self.expect_airflow = expect_airflow
+        self.expect_pendulum = expect_pendulum
+        self.string_args = string_args
+        self.templates_dict = templates_dict
+        self.templates_exts = templates_exts
+        self.runner_endpoint = runner_endpoint
+        
+        super().__init__(
+            python_callable=python_callable,
+            use_dill = use_dill,
+            op_args=op_args,
+            op_kwargs=op_kwargs,
+            string_args=string_args,
+            templates_dict=templates_dict,
+            templates_exts=templates_exts,
+            expect_airflow = expect_airflow,
+            **kwargs,
+        )
+
+    def _iter_serializable_context_keys(self):
+        yield from self.BASE_SERIALIZABLE_CONTEXT_KEYS
+        if self.system_site_packages or "apache-airflow" in self.requirements:
+            yield from self.AIRFLOW_SERIALIZABLE_CONTEXT_KEYS
+            yield from self.PENDULUM_SERIALIZABLE_CONTEXT_KEYS
+        elif "pendulum" in self.requirements:
+            yield from self.PENDULUM_SERIALIZABLE_CONTEXT_KEYS
+
+    def execute(self, context: Context) -> Any:
+        serializable_keys = set(self._iter_serializable_context_keys())
+        serializable_context = context_copy_partial(context, serializable_keys)
+        return super().execute(context=serializable_context)
+
+    def execute_callable(self):
+        import asyncio
+
+        payload = dict(
+            python_callable_str = dedent(inspect.getsource(self.python_callable)),
+            python_callable_name = self.python_callable.__name__,
+            requirements = self.requirements,
+            pip_install_options = self.pip_install_options,
+            venv_python_version = self.venv_python_version,
+            source_python_version = self.source_python_version, 
+            snowflake_connection_uri = self.snowflake_connection_uri,
+            use_dill = self.use_dill,
+            system_site_packages = self.system_site_packages,
+            target_python = self.target_python,
+            dag_id = self.dag_id,
+            task_id = self.task_id,
+            task_start_date = "2022-01-01T00:00:00Z00:00", #self.task_start_date,  ##TODO: get task start time
+            op_args = self.op_args,
+            op_kwargs = self.op_kwargs,
+            templates_dict = self.templates_dict,
+            templates_exts = self.templates_exts,
+            expect_airflow = self.expect_airflow,
+            expect_pendulum = self.expect_pendulum,
+            string_args = self.string_args,
+        )
+
+        responses =  asyncio.run(self._execute_python_callable_in_snowservices(payload))
+
+        return responses
+        
+    async def _execute_python_callable_in_snowservices(self, payload):
+        import aiohttp
+
+        responses = []
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(self.runner_endpoint) as websocket_runner:
+                await websocket_runner.send_json(payload)
+
+                while True:
+                    response = await websocket_runner.receive_json()
+                    responses += [response]
+
+                    # make sure we're not receiving empty responses
+                    assert response != None
+
+                    if response.get("type") in ["results", "error"]:
+                        print(responses)
+                        break
+        return responses
