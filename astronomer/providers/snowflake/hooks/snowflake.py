@@ -372,9 +372,6 @@ class SnowServicesHook(SnowflakeHook):
                                            )
             
             config.load_kube_config()
-            
-            with open('spec_file_name.yml', 'w') as f:
-                yaml.dump(k8s_spec, f, default_flow_style=False)
 
             #create a namespace for this service and deploy services
             try:
@@ -508,7 +505,7 @@ class SnowServicesHook(SnowflakeHook):
         response = {'pods': {}, 'services': {}, 'deployments': {}}
 
         if self.local_test == 'astro_cli':
-            response['services']['snowservice-runner'] = {'ingress_url': 'host.docker.internal:8001'}
+            response['services'][service_name] = {'ingress_url': 'host.docker.internal:8001'}
             return response
 
         elif self.local_test == 'docker_desktop_k8s':
