@@ -354,7 +354,9 @@ class SnowServicesHook(SnowflakeHook):
             else:
                 with open(spec_file_name, 'r') as f:
                     try:
-                        k8s_spec = json.dumps(yaml.safe_load(f))
+                        k8s_spec: list = []
+                        for doc in yaml.safe_load_all(f):
+                            k8s_spec.append(json.dumps(doc))
                     except yaml.YAMLError as exception:
                         raise exception
 
@@ -365,7 +367,7 @@ class SnowServicesHook(SnowflakeHook):
             from kubernetes import client, config, utils
 
             if not spec_file_name:                    
-                k8s_spec = create_k8s_spec(service_name=service_name, 
+                k8s_spec: list = create_k8s_spec(service_name=service_name, 
                                            runner_endpoint=runner_endpoint,
                                            runner_port=runner_port,
                                            local_test=self.local_test,
@@ -404,7 +406,7 @@ class SnowServicesHook(SnowflakeHook):
             temp_stage_name = f'{service_name}_{temp_stage_postfix}'
 
             if not spec_file_name:
-                k8s_spec = create_k8s_spec(service_name=service_name, 
+                k8s_spec: list = create_k8s_spec(service_name=service_name, 
                                            runner_endpoint=runner_endpoint,
                                            runner_port=runner_port,
                                            )
@@ -412,7 +414,7 @@ class SnowServicesHook(SnowflakeHook):
             spec_file_name = f'{temp_stage_name}_spec.yml'                    
 
             with open(spec_file_name, 'w') as f:
-                yaml.dump(k8s_spec, f, default_flow_style=False)
+                yaml.dump_all(k8s_spec, f, default_flow_style=False)
 
             try:
                 self.run( f"CREATE TEMPORARY STAGE {temp_stage_name}; \

@@ -1,18 +1,17 @@
 from __future__ import annotations
+import os
 
 def create_k8s_spec(
     service_name:str, 
-    runner_endpoint:str, 
-    runner_port:int, 
+    runner_endpoint:str = 'runner-endpoint', 
+    runner_port:int = 8001, 
+    runner_image: str = 'snowservices-runner:latest',
     local_test:str | None = None
     ):
 
     if runner_port and not isinstance(runner_port, int):
         raise AttributeError('runner_port must be an integer.')
     
-    runner_endpoint = runner_endpoint or 'runner-endpoint'
-    runner_port = runner_port or 8001
-
     #For testing in local (aka Docker Desktop Kubernetes) we will create a loadbalancer and full deployment spec.
     lb_spec = {
         'apiVersion': 'v1', 
@@ -45,7 +44,7 @@ def create_k8s_spec(
                     'labels': {'app.kubernetes.io/name': 'snowservice-runner'}}, 
                 'spec': {
                     'containers': [{
-                        'image': 'snowservices-runner:latest', 
+                        'image': runner_image, 
                         'imagePullPolicy': 'IfNotPresent', 
                         'name': 'snowservice-runner', 
                         'args': [], 
@@ -65,17 +64,45 @@ def create_k8s_spec(
                         ]
                     }], 
                     'volumes': [
-                        {'name': 'xcom', 'source': 'local'}, 
-                        #{'name': 'xcom', 'hostPath': {'path': f'{os.getcwd()}/xcom', 'type': 'Directory'}},
+                        # {'name': 'xcom', 'source': 'local'}, 
+                        {'name': 'xcom', 'hostPath': {'path': f'{os.getcwd()}/xcom', 'type': 'DirectoryOrCreate'}},
+                        # {'name': 'xcom', 'hostPath': {'path': './xcom', 'type': 'DirectoryOrCreate'}},
                     ], 
                 }
             }
         }
     }
+    
+    snowservices_spec = {
+        'endpoints': 
+        [
+            {
+                'name': runner_endpoint, 
+                'port': runner_port, 
+            },    
+        ],
+        'containers': 
+        [
+            {
+                'name': 'snowservice-runner', 
+                'image': runner_image,
+                'command': ["gunicorn", "api:app", "--bind", "0.0.0.0:8001", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "--timeout", "0"], 
+                'env': [
+                    'AIRFLOW__CORE__LOAD_EXAMPLES:False',
+                    'AIRFLOW__CORE__ENABLE_XCOM_PICKLING:True',
+                    'PYTHONUNBUFFERED:1',
+                    'AIRFLOW__CORE__XCOM_BACKEND:backends.local.localfile_xcom_backend.LocalFileXComBackend',
+                    'AIRFLOW__CORE__XCOM_LOCALFILE_DIR:/xcom',
+                ]
+            }
+        ],
+        'volumes': 
+        [
+            {'name': 'xcom', 'source': 'local'},  
+        ]
+    }
 
     if local_test:
         return [lb_spec, deployment_spec]
     else:
-        return {'spec': {'container': deployment_spec['spec']['template']['spec']['containers'], 
-                         'endpoint': lb_spec['spec']['ports'],
-                         'volume': deployment_spec['spec']['template']['spec']['volumes']}}
+        return [snowservices_spec]
