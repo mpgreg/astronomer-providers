@@ -3,7 +3,7 @@ import json
 from typing import Any
 import pandas as pd
 from airflow.models.xcom import BaseXCom
-from airflow.models import XCom
+# from airflow.models import XCom
 from airflow.utils.json import XComDecoder, XComEncoder
 from pathlib import Path
 
@@ -78,7 +78,7 @@ class LocalFileXComBackend(BaseXCom):
 
 
     @staticmethod
-    def deserialize_value(result: XCom) -> Any:
+    def deserialize_value(value) -> Any:
         """
         Reads the value from AIRFLOW__CORE__XCOM_LOCALFILE_DIR using the file_path.
         The file path is assumed to be: <AIRFLOW__CORE__XCOM_LOCALFILE_DIR>/<dag_id>/<task_id>/<run_id>/<key>.json or .parquet
@@ -89,7 +89,8 @@ class LocalFileXComBackend(BaseXCom):
         """
 
         # first, decode the key
-        file_path = Path(BaseXCom.deserialize_value(result))
+        # file_path = Path(BaseXCom.deserialize_value(value))
+
         #file_path = Path(json.loads(file_path.decode("UTF-8"), cls=XComDecoder, object_hook=object_hook))
             
         assert file_path.open(), f'XCOM file at {file_path.as_posix()} cannot be opened.'
@@ -104,9 +105,9 @@ class LocalFileXComBackend(BaseXCom):
             raise ValueError(f"XCOM file output must be .json or .parquet.  Found {file_path.suffix()}")  
 
 
-os.environ['AIRFLOW__CORE__XCOM_LOCALFILE_DIR']='/Users/michaelgregory/Documents/Astronomer/code/demos/astronomer-providers/astronomer/providers/core/xcom_backends/local'
-x=LocalFileXComBackend()
-value={"a": 1, "b": 1}, {"a": 2, "b": 4}, {"a": 3, "b": 9}
-value=pd.DataFrame(value)
-file_path = x.serialize_value(value=value, dag_id='testdag', task_id='testtask', run_id='testrun', key='testkey')
-value= x.deserialize_value(file_path=file_path)
+# os.environ['AIRFLOW__CORE__XCOM_LOCALFILE_DIR']='/tmp/xcom'
+# x=LocalFileXComBackend()
+# value={"a": 1, "b": 1}, {"a": 2, "b": 4}, {"a": 3, "b": 9}
+# value=pd.DataFrame(value)
+# file_path = x.serialize_value(value=value, dag_id='testdag', task_id='testtask', run_id='testrun', key='testkey')
+# value= x.deserialize_value(file_path=file_path)
