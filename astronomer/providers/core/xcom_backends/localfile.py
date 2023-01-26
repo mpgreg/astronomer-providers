@@ -1,10 +1,11 @@
 import os
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 import pandas as pd
 from airflow.models.xcom import BaseXCom
-# from airflow.models import XCom
-# from airflow.utils.json import XComDecoder, XComEncoder
+if TYPE_CHECKING:
+    from airflow.models.xcom import XCom
+    
 from pathlib import Path
 
 _ENCODING = "utf-8"
@@ -26,17 +27,17 @@ class LocalFileXComBackend(BaseXCom):
             return xcom_dir
         else:
             raise NotADirectoryError(f'AIRFLOW__CORE__XCOM_LOCALFILE_DIR directory {xcom_dir} is not found or missing permissions.')
-    @staticmethod
-    def serialize_value(
+    
+    def _serialize(
         value: Any, 
         key: str, 
         dag_id: str, 
         task_id: str, 
-        run_id: str, 
-        map_index: int = -1
-    ) -> bytes:
+        run_id: str
+        ) -> str:
         """
-        Writes the value to AIRFLOW__CORE__XCOM_LOCALFILE_DIR and returns the file key. The key is used to retrieve the value later.
+        Writes the value to AIRFLOW__CORE__XCOM_LOCALFILE_DIR and returns the file path to be serialized in Xcom db. 
+
         The local path is: <AIRFLOW__CORE__XCOM_LOCALFILE_DIR>/<dag_id>/<task_id>/<run_id>/<key>.json or .parquet
         :param value: The value to serialize.
         :type value: Any
@@ -54,6 +55,7 @@ class LocalFileXComBackend(BaseXCom):
 
         xcom_dir: Path = LocalFileXComBackend.check_xcom_dir()
         output_dir: Path = xcom_dir.joinpath(f"{dag_id}/{task_id}/{run_id}/")
+        
         if not output_dir.is_dir():
             try:
                 output_dir.mkdir(parents=True)
@@ -70,22 +72,18 @@ class LocalFileXComBackend(BaseXCom):
         else:
             file_path = output_dir.joinpath(f'{key}.json')
             try:
-                # file_path.write_bytes(json.dumps(value, cls=XComEncoder).encode("UTF-8"))
                 file_path.write_bytes(json.dumps(value).encode("UTF-8"))
             except: 
                 raise
         
-        #return BaseXCom.serialize_value(file_path.as_posix())
-        return file_path.as_posix().encode(_ENCODING)
+        return file_path.as_posix() #.encode(_ENCODING)
 
-
-    @staticmethod
-    def deserialize_value(file_path) -> Any:
+    def _deserialize(file_path: str) -> Any:
         """
-        Reads the value from AIRFLOW__CORE__XCOM_LOCALFILE_DIR using the file_path.
+        Reads the value from a fully-qualified file_path.
         The file path is assumed to be: <AIRFLOW__CORE__XCOM_LOCALFILE_DIR>/<dag_id>/<task_id>/<run_id>/<key>.json or .parquet
         :param file_path: The FQ file path.
-        :type file_path: Byte-encoded str
+        :type file_path: str
         :return: The deserialized value.
         :rtype: Any
         """
@@ -93,7 +91,7 @@ class LocalFileXComBackend(BaseXCom):
         # first, decode the key
         # file_path = Path(BaseXCom.deserialize_value(value))
         #file_path = Path(json.loads(file_path.decode("UTF-8"), cls=XComDecoder, object_hook=object_hook))
-        file_path = Path(file_path.decode(_ENCODING))
+        file_path: Path = Path(file_path) #.decode(_ENCODING))
             
         assert file_path.open(), f'XCOM file at {file_path.as_posix()} cannot be opened.'
 
@@ -106,10 +104,57 @@ class LocalFileXComBackend(BaseXCom):
         else:
             raise ValueError(f"XCOM file output must be .json or .parquet.  Found {file_path.suffix()}")  
 
+    @staticmethod
+    def serialize_value(
+        value: Any, 
+        key: str, 
+        dag_id: str, 
+        task_id: str, 
+        run_id: str, 
+        map_index: int = -1,
+        **kwargs
+    ) -> Any:
+        """
+        Custom Xcom Wrapper to serialize to local files and returns the file key to Xcom.
+        
+        :param value: The value to serialize.
+        :type value: Any
+        :param key: The key to use for the xcom output (ie. filename)
+        :type: key: str
+        :param dag_id: DAG id
+        :type dag_id: str
+        :param task_id: Task id
+        :type task_id: str
+        :param run_id: DAG run id
+        :type run_id: str
+        :return: The file key byte encoded string.
+        :rtype: str
+        """
+
+        value: str = LocalFileXComBackend._serialize(value=value, key=key, dag_id=dag_id, task_id=task_id, run_id=run_id)
+        
+        return BaseXCom.serialize_value(value)
+
+    @staticmethod
+    def deserialize_value(result: "XCom") -> Any:
+        """
+        Deserialize the result of xcom_pull before passing the result to the next task.
+        :param result: Xcom result
+        :return: 
+        """
+        result = BaseXCom.deserialize_value(result)
+        return LocalFileXComBackend._deserialize(result)
+
+
+
 
 # os.environ['AIRFLOW__CORE__XCOM_LOCALFILE_DIR']='/tmp/xcom'
 # x=LocalFileXComBackend()
 # value={"a": 1, "b": 1}, {"a": 2, "b": 4}, {"a": 3, "b": 9}
 # value=pd.DataFrame(value)
 # file_path = x.serialize_value(value=value, dag_id='testdag', task_id='testtask', run_id='testrun', key='testkey')
-# value= x.deserialize_value(file_path=file_path)
+# from airflow.models.xcom import XCom
+# result = XCom()
+# result.value = file_path
+# value= x.deserialize_value(result)
+# value

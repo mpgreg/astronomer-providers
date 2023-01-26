@@ -480,23 +480,7 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
             **kwargs,
         )
 
-    def _iter_serializable_context_keys(self):
-        yield from self.BASE_SERIALIZABLE_CONTEXT_KEYS
-        if self.system_site_packages or "apache-airflow" in self.requirements:
-            yield from self.AIRFLOW_SERIALIZABLE_CONTEXT_KEYS
-            yield from self.PENDULUM_SERIALIZABLE_CONTEXT_KEYS
-        elif "pendulum" in self.requirements:
-            yield from self.PENDULUM_SERIALIZABLE_CONTEXT_KEYS
-
-    def execute(self, context: Context) -> Any:
-        serializable_keys = set(self._iter_serializable_context_keys())
-        serializable_context = context_copy_partial(context, serializable_keys)
-        return super().execute(context=serializable_context)
-
-    def execute_callable(self):
-        import asyncio
-
-        payload = dict(
+        self.payload = dict(
             python_callable_str = dedent(inspect.getsource(self.python_callable)),
             python_callable_name = self.python_callable.__name__,
             requirements = self.requirements,
@@ -519,7 +503,23 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
             string_args = self.string_args,
         )
 
-        responses =  asyncio.run(self._execute_python_callable_in_snowservices(payload))
+    def _iter_serializable_context_keys(self):
+        yield from self.BASE_SERIALIZABLE_CONTEXT_KEYS
+        if self.system_site_packages or "apache-airflow" in self.requirements:
+            yield from self.AIRFLOW_SERIALIZABLE_CONTEXT_KEYS
+            yield from self.PENDULUM_SERIALIZABLE_CONTEXT_KEYS
+        elif "pendulum" in self.requirements:
+            yield from self.PENDULUM_SERIALIZABLE_CONTEXT_KEYS
+
+    def execute(self, context: Context) -> Any:
+        serializable_keys = set(self._iter_serializable_context_keys())
+        serializable_context = context_copy_partial(context, serializable_keys)
+        return super().execute(context=serializable_context)
+
+    def execute_callable(self):
+        import asyncio
+
+        responses =  asyncio.run(self._execute_python_callable_in_snowservices(self.payload))
 
         return responses
         
