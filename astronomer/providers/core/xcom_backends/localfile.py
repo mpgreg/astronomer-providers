@@ -4,10 +4,10 @@ from typing import Any
 import pandas as pd
 from airflow.models.xcom import BaseXCom
 # from airflow.models import XCom
-from airflow.utils.json import XComDecoder, XComEncoder
+# from airflow.utils.json import XComDecoder, XComEncoder
 from pathlib import Path
 
-ENCODING = "utf-8"
+_ENCODING = "utf-8"
 
 class LocalFileXComBackend(BaseXCom):
     """
@@ -70,15 +70,17 @@ class LocalFileXComBackend(BaseXCom):
         else:
             file_path = output_dir.joinpath(f'{key}.json')
             try:
-                file_path.write_bytes(json.dumps(value, cls=XComEncoder).encode("UTF-8"))
+                # file_path.write_bytes(json.dumps(value, cls=XComEncoder).encode("UTF-8"))
+                file_path.write_bytes(json.dumps(value).encode("UTF-8"))
             except: 
                 raise
         
-        return BaseXCom.serialize_value(file_path.as_posix())
+        #return BaseXCom.serialize_value(file_path.as_posix())
+        return file_path.as_posix().encode(_ENCODING)
 
 
     @staticmethod
-    def deserialize_value(value) -> Any:
+    def deserialize_value(file_path) -> Any:
         """
         Reads the value from AIRFLOW__CORE__XCOM_LOCALFILE_DIR using the file_path.
         The file path is assumed to be: <AIRFLOW__CORE__XCOM_LOCALFILE_DIR>/<dag_id>/<task_id>/<run_id>/<key>.json or .parquet
@@ -90,8 +92,8 @@ class LocalFileXComBackend(BaseXCom):
 
         # first, decode the key
         # file_path = Path(BaseXCom.deserialize_value(value))
-
         #file_path = Path(json.loads(file_path.decode("UTF-8"), cls=XComDecoder, object_hook=object_hook))
+        file_path = Path(file_path.decode(_ENCODING))
             
         assert file_path.open(), f'XCOM file at {file_path.as_posix()} cannot be opened.'
 
