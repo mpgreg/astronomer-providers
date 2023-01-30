@@ -9,7 +9,7 @@ from typing import Any, Callable, List, Collection, Iterable, Mapping
 
 from airflow.exceptions import AirflowException
 from airflow.utils.context import Context, context_copy_partial
-from airflow.operators.python import _BasePythonVirtualenvOperator
+from airflow.operators.python import _BasePythonVirtualenvOperator, get_current_context
 
 try:
     from airflow.providers.snowflake.operators.snowflake import SnowflakeOperator
@@ -383,6 +383,7 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
     happen inside the function and no variables outside the scope may be referenced. All arguments to 
     the function must be passed in the function signature. string_args, args and kwargs will not be passed.
     
+    ##TODO: 
     Task XCOMs will be saved in a Snowflake stage and return values to Airflow (plain xcom) will list 
     this stage location and filename (ie. @mystage/path/file).
 
@@ -467,6 +468,7 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
         self.templates_dict = templates_dict
         self.templates_exts = templates_exts
         self.runner_endpoint = runner_endpoint
+        self.system_site_packages = True
         
         super().__init__(
             python_callable=python_callable,
@@ -480,7 +482,9 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
             **kwargs,
         )
 
-        self.payload = dict(
+    def _build_payload(self, context):
+
+        payload = dict(
             python_callable_str = dedent(inspect.getsource(self.python_callable)),
             python_callable_name = self.python_callable.__name__,
             requirements = self.requirements,
@@ -493,7 +497,7 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
             target_python = self.target_python,
             dag_id = self.dag_id,
             task_id = self.task_id,
-            task_start_date = "2022-01-01T00:00:00Z00:00", #self.task_start_date,  ##TODO: get task start time
+            task_start_date = context["ts"], #"2022-01-01T00:00:00Z00:00"
             op_args = self.op_args,
             op_kwargs = self.op_kwargs,
             templates_dict = self.templates_dict,
@@ -501,7 +505,10 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
             expect_airflow = self.expect_airflow,
             expect_pendulum = self.expect_pendulum,
             string_args = self.string_args,
+            xcom_input = context["ti"].xcom_pull(),
         )
+        
+        return payload
 
     def _iter_serializable_context_keys(self):
         yield from self.BASE_SERIALIZABLE_CONTEXT_KEYS
@@ -514,6 +521,19 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
     def execute(self, context: Context) -> Any:
         serializable_keys = set(self._iter_serializable_context_keys())
         serializable_context = context_copy_partial(context, serializable_keys)
+
+
+        self.payload = self._build_payload(context)
+
+        # import json
+        # with open(f'/tmp/{self.task_id}_payload.json', 'w') as f:
+        #     f.write(json.dumps(self.payload))
+
+        # with open(f'/tmp/{self.task_id}_context.json', 'w') as f:
+        #     f.write(json.dumps([context["ti"].xcom_pull(), context["ts"]]))
+
+
+
         return super().execute(context=serializable_context)
 
     def execute_callable(self):
@@ -526,6 +546,8 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
     async def _execute_python_callable_in_snowservices(self, payload):
         import aiohttp
 
+        # payload['xcom_input'] = context["ti"].xcom_pull()
+
         responses = []
         async with aiohttp.ClientSession() as session:
             async with session.ws_connect(self.runner_endpoint) as websocket_runner:
@@ -533,12 +555,16 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
 
                 while True:
                     response = await websocket_runner.receive_json()
-                    responses += [response]
+                    #responses += [response]
 
                     # make sure we're not receiving empty responses
                     assert response != None
 
-                    if response.get("type") in ["results", "error"]:
-                        print(responses)
-                        break
-        return responses
+                    if response['type'] == 'results':
+                        self.log.info(response)
+                        return response['output']
+                    elif response['type'] in ["log", "execution_log", "infra"]:
+                        self.log.info(response)
+                    elif response['type'] == "error":
+                        self.log.error(response)
+                        raise AirflowException("Error occurred in Task run.")

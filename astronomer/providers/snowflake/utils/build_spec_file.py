@@ -26,8 +26,8 @@ def create_k8s_spec(
                     'targetPort': runner_port
                     }], 
             'selector': {'app.kubernetes.io/name': 'snowservice-runner'}, 
-            'type': 'LoadBalancer'
-            }, 
+        }, 
+        'type': 'LoadBalancer'
     }
 
     deployment_spec = {
@@ -66,7 +66,6 @@ def create_k8s_spec(
                     'volumes': [
                         # {'name': 'xcom', 'source': 'local'}, 
                         {'name': 'xcom', 'hostPath': {'path': f'{os.getcwd()}/xcom', 'type': 'DirectoryOrCreate'}},
-                        # {'name': 'xcom', 'hostPath': {'path': './xcom', 'type': 'DirectoryOrCreate'}},
                     ], 
                 }
             }

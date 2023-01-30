@@ -76,7 +76,7 @@ class LocalFileXComBackend(BaseXCom):
             except: 
                 raise
         
-        return file_path.as_posix() #.encode(_ENCODING)
+        return file_path.relative_to(xcom_dir).as_posix()
 
     def _deserialize(file_path: str) -> Any:
         """
@@ -88,10 +88,8 @@ class LocalFileXComBackend(BaseXCom):
         :rtype: Any
         """
 
-        # first, decode the key
-        # file_path = Path(BaseXCom.deserialize_value(value))
-        #file_path = Path(json.loads(file_path.decode("UTF-8"), cls=XComDecoder, object_hook=object_hook))
-        file_path: Path = Path(file_path) #.decode(_ENCODING))
+        xcom_dir: Path = LocalFileXComBackend.check_xcom_dir()
+        file_path: Path = xcom_dir.joinpath(file_path)
             
         assert file_path.open(), f'XCOM file at {file_path.as_posix()} cannot be opened.'
 
@@ -142,8 +140,12 @@ class LocalFileXComBackend(BaseXCom):
         :param result: Xcom result
         :return: 
         """
-        result = BaseXCom.deserialize_value(result)
-        return LocalFileXComBackend._deserialize(result)
+
+        # result = BaseXCom.deserialize_value(result)
+        
+        # return LocalFileXComBackend._deserialize(result)
+        #return 'test_snowservices_dag/mytask/manual__2023-01-29T17:12:27.806448+00:00/return_value.parquet'
+        return None
 
 
 

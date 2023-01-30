@@ -211,6 +211,11 @@ class SnowServicesHook(SnowflakeHook):
         self.conn_id = kwargs.get("conn_id")
         self.local_test = kwargs.get("local_test") or None
 
+        if self.local_test == '':
+            self.local_test = None 
+
+        assert self.local_test in ['astro_cli', 'docker_desktop_k8s', None], f"Unrecognized option for local_test={self.local_test}.  Use 'astro_cli' or 'docker_desktop_k8s' or None."
+
         super().__init__(*args, **kwargs)
 
     def create_pool(self, 
@@ -238,10 +243,8 @@ class SnowServicesHook(SnowflakeHook):
         :param gpu_name: Whether to use GPU nodes (currently limited to NVIDIAA10G)
         :type gpu_name: str
         """
-        if self.local_test == 'astro_cli' or self.local_test == 'docker_desktop_k8s':
-            raise NotImplementedError('No compute pool in local testing mode.')
-            return None
-        elif not self.local_test:
+
+        if not self.local_test:
             if gpu_name and gpu_name.lower() not in self.gpu_types:
                 raise AttributeError(f"Unsupported option {gpu_name} specified for gpu_name.")
 
@@ -257,15 +260,15 @@ class SnowServicesHook(SnowflakeHook):
 
             replace_existing_str = ' IF NOT EXISTS ' if not replace_existing else ''
 
-            print(f"CREATE COMPUTE POOL {replace_existing_str} {pool_name} \
+            self.run(
+                f"CREATE COMPUTE POOL {replace_existing_str} {pool_name} \
                     MIN_NODES = {min_nodes} \
                     MAX_NODES = {max_nodes} \
                     INSTANCE_FAMILY = {instance_family} \
-                    {gpu_option_str};")
+                    {gpu_option_str};"
+            )
 
-            return pool_name
-        else:
-            raise AttributeError('Invalid option for local_test')
+        return pool_name
     
     def remove_pool(self, pool_name:str, force_all=False):
         """
@@ -275,16 +278,15 @@ class SnowServicesHook(SnowflakeHook):
         :param force_all: Forcibly delete all existing snowservices before dropping the pool
         :type force_all: bool
         """
-        if self.local_test == 'astro_cli' or self.local_test == 'docker_desktop_k8s':
-            raise NotImplementedError('No compute pool in local testing mode.')
-        elif not self.local_test:    
+        
+        if not self.local_test:    
             force_all = 'true' if force_all else 'false'
-            print(f"ALTER SESSION SET COMPUTE_POOL_FORCE_DELETE_ALL_SNOWSERVICES_ON_DROP = {force_all};\
-                    DROP COMPUTE POOL {pool_name};")
-            return None
-        else:
-            raise AttributeError('Invalid option for local_test')
-    
+            self.run(
+                f"ALTER SESSION SET COMPUTE_POOL_FORCE_DELETE_ALL_SNOWSERVICES_ON_DROP = {force_all}; \
+                    DROP COMPUTE POOL {pool_name};"
+            )
+
+        
     def list_pools(self, name_prefix:str = None, regex_pattern:str = None, limit:int = None):
         """
         List current Snowservices compute pools
@@ -298,10 +300,7 @@ class SnowServicesHook(SnowflakeHook):
         """
         ##TODO: Add starts FROM logic
 
-        if self.local_test == 'astro_cli' or self.local_test == 'docker_desktop_k8s':
-            raise NotImplementedError('No compute pool in local testing mode.')
-
-        elif not self.local_test:    
+        if not self.local_test:    
             if name_prefix:
                 prefix_str = f" STARTS WITH {name_prefix} "
 
@@ -311,18 +310,19 @@ class SnowServicesHook(SnowflakeHook):
             if limit:
                 limit_str = f" LIMIT {limit} "
 
-            response = 'List of compute pools.' #self.get_conn().cursor().execute(f"SHOW COMPUTE POOLS {like_str} {prefix_str} {limit_str};").fetchall()
+            response = self.get_conn().cursor().execute(f"SHOW COMPUTE POOLS {like_str} {prefix_str} {limit_str};").fetchall()
             return response
         else:
-            raise AttributeError('Invalid option for local_test')
+            return None
 
     def create_service(self, 
         service_name : str, 
         pool_name: str, 
         runner_endpoint: str | None = None,
         runner_port: int | None = None,
+        runner_image: str | None = None,
         spec_file_name : str = None,
-        replace_existing = 'False', 
+        replace_existing: bool = False, 
         min_inst = 1, 
         max_inst = 1) -> str:
         """
@@ -336,6 +336,8 @@ class SnowServicesHook(SnowflakeHook):
         :type runner_endpoint: str
         :param runner_port: Port number (int) for the snowservice runner.
         :type runner_port: int
+        :param runner_image: Name of Docker image to use for the runner.
+        :type runner_image: str
         :param replace_existing: Whether an existing service should be replaced or exit with failure.
         :type replace_existing: bool
         :param min_inst: The minimum number of nodes for scaling group
@@ -359,46 +361,57 @@ class SnowServicesHook(SnowflakeHook):
                             k8s_spec.append(json.dumps(doc))
                     except yaml.YAMLError as exception:
                         raise exception
+        else:
+            k8s_spec: list = create_k8s_spec(
+                                service_name=service_name, 
+                                runner_endpoint=runner_endpoint,
+                                runner_port=runner_port,
+                                runner_image=runner_image,
+                                local_test=self.local_test,
+                                )
 
         if self.local_test == 'astro_cli':
-            raise NotImplementedError('Create service via astro cli.')
+            print('Create service via astro cli and docker-compose-override.yml. Doing nothing.')
+            return service_name
 
         elif self.local_test == 'docker_desktop_k8s':
             from kubernetes import client, config, utils
 
-            if not spec_file_name:                    
-                k8s_spec: list = create_k8s_spec(service_name=service_name, 
-                                           runner_endpoint=runner_endpoint,
-                                           runner_port=runner_port,
-                                           local_test=self.local_test,
-                                           )
-            
             config.load_kube_config()
 
+            # if not spec_file_name:                    
+            #     k8s_spec: list = create_k8s_spec(service_name=service_name, 
+            #                                runner_endpoint=runner_endpoint,
+            #                                runner_port=runner_port,
+            #                                runner_image=runner_image,
+            #                                local_test=self.local_test,
+            #                                )
+            
             #create a namespace for this service and deploy services
+            metadata_obj = client.V1ObjectMeta(name=service_name, namespace=service_name)
+            namespace_obj = client.V1Namespace(metadata=metadata_obj)
+            corev1 = client.CoreV1Api()
+
+            for namespace in corev1.list_namespace().items:
+                if namespace.metadata.name == service_name:
+                    print(f"Service {service_name} already exists.")
+
+                    if not replace_existing:
+                        print('Using existing service.')
+                        return service_name
+                    else:
+                        self.remove_service(service_name=service_name)
+                        
+            apiv1 = client.ApiClient()
             try:
-                metadata_obj = client.V1ObjectMeta(name=service_name, namespace=service_name)
-                namespace_obj = client.V1Namespace(metadata=metadata_obj)
-                v1 = client.CoreV1Api()
-                v1.create_namespace(namespace_obj)
-
-                k8s_client = client.ApiClient()
-                try:
-                    for doc in k8s_spec:
-                        utils.create_from_dict(k8s_client, doc, namespace=service_name)
-                except:
-                    v1.delete_namespace(name=service_name)
-                    raise utils.FailToCreateError()
-                    
+                corev1.create_namespace(namespace_obj)
+                for doc in k8s_spec:
+                    utils.create_from_dict(apiv1, doc, namespace=service_name)
+                return service_name
+            except:
+                self.remove_service(service_name=service_name)
+                raise utils.FailToCreateError(f'Could not create pods in service {service_name}')
             
-            except Exception as e:
-                print(e)
-                if e.reason and e.status:
-                    if e.reason == 'Conflict' and e.status == 409:
-                        raise utils.FailToCreateError('Service already exists.') 
-            
-            return service_name
-
         elif not self.local_test:  
             replace_existing_str = ' IF NOT EXISTS ' if not replace_existing else ''
             
@@ -409,6 +422,7 @@ class SnowServicesHook(SnowflakeHook):
                 k8s_spec: list = create_k8s_spec(service_name=service_name, 
                                            runner_endpoint=runner_endpoint,
                                            runner_port=runner_port,
+                                           runner_image=runner_image,
                                            )
 
             spec_file_name = f'{temp_stage_name}_spec.yml'                    
@@ -420,88 +434,95 @@ class SnowServicesHook(SnowflakeHook):
                 self.run( f"CREATE TEMPORARY STAGE {temp_stage_name}; \
                             PUT file://{spec_file_name} @{temp_stage_name} \
                                 AUTO_COMPRESS = False \
-                                SOURCE_COMPRESSION = NONE;") \
-                            # CREATE SERVICE {replace_existing_str} {service_name} \
-                            #     MIN_INSTANCES = {min_inst} \
-                            #     MAX_INSTANCES = {max_inst} \
-                            #     COMPUTE_POOL = {pool_name} \
-                            #     SPEC = @{temp_stage_name}/{spec_file_name};")
-            except Exception as e:
-                print(e)
-            finally:
-                os.remove(spec_file_name)
+                                SOURCE_COMPRESSION = NONE \
+                            CREATE SERVICE {replace_existing_str} {service_name} \
+                                MIN_INSTANCES = {min_inst} \
+                                MAX_INSTANCES = {max_inst} \
+                                COMPUTE_POOL = {pool_name} \
+                                SPEC = @{temp_stage_name}/{spec_file_name};")
+            except:
+                return None
+                
+            os.remove(spec_file_name)
     
             ##TODO: need wait loop or asycn operation to make sure it is up
-            return service_name
-        else:
-            raise AttributeError('Invalid option for local_test')
+
 
     def suspend_service(self, service_name:str):
-        if self.local_test == 'astro_cli' or self.local_test == 'docker_desktop_k8s':
-            raise NotImplementedError('No suspend option in local testing mode.')
-        elif not self.local_test:    
-            print(f'ALTER SERVICE IF EXISTS {service_name} SUSPEND')
-        else:
-            raise AttributeError('Invalid option for local_test')
-        return None
+        if self.local_test in ['astro_cli', 'docker_desktop_k8s']:
+            print('No suspend option in local testing mode.')
+            return 'success'
+        elif not self.local_test: 
+            try:   
+                self.run(f'ALTER SERVICE IF EXISTS {service_name} SUSPEND')
+                return 'success'
+            except: 
+                return None
 
     def resume_service(self, service_name:str):
-        if self.local_test == 'astro_cli' or self.local_test == 'docker_desktop_k8s':
-            raise NotImplementedError('No resume option in local testing mode.')
+        if self.local_test in ['astro_cli', 'docker_desktop_k8s']:
+            print('No resume option in local testing mode.')
+            return 'success'
         elif not self.local_test:    
-            print(f'ALTER SERVICE IF EXISTS {service_name} RESUME')
-        else:
-            raise AttributeError('Invalid option for local_test')
-        return None
+            try:
+                self.run(f'ALTER SERVICE IF EXISTS {service_name} RESUME')
+                return 'success'
+            except:
+                return None
 
     def remove_service(self, service_name:str):
         if self.local_test == 'astro_cli':
-            raise NotImplementedError('Remove service via Astro CLI.')
+            print('Remove service via Astro CLI.')
+            return 'success'
 
         elif self.local_test == 'docker_desktop_k8s':
             from kubernetes import client, config
             from time import sleep
             config.load_kube_config()
-            
-            status = self.describe_service(service_name=service_name)
-            for deployment in status['deployments'].keys():
-                v1 = client.AppsV1Api()
-                v1.delete_namespaced_deployment(name=deployment, namespace=service_name) #deployment['namespace'])
-            for pod in status['pods'].keys():
-                v1 = client.CoreV1Api()
-                v1.delete_namespaced_pod(name=pod, namespace=service_name) # namespace=pod['namespace'])
-            for service in status['services'].keys():
-                v1 = client.CoreV1Api()
-                v1.delete_namespaced_service(name=service, namespace=service_name) # namespace=service['namespace'])
+            metadata_obj = client.V1ObjectMeta(name=service_name, namespace=service_name)
+            namespace_obj = client.V1Namespace(metadata=metadata_obj)
+            corev1 = client.CoreV1Api()
+            appsv1 = client.AppsV1Api()
 
-            v1 = client.CoreV1Api()
+            for namespace in corev1.list_namespace().items:
+                if namespace.metadata.name == service_name:
+                    try:
+                        #could just delete namespace but faster to delete objects first
+                        for deployment in appsv1.list_namespaced_deployment(namespace=service_name).items: 
+                            appsv1.delete_namespaced_deployment(name=deployment, namespace=service_name) 
+                            
+                        for pod in corev1.list_namespaced_pod(namespace=service_name).items: 
+                            corev1.delete_namespaced_pod(name=pod, namespace=service_name) 
 
-            pods = v1.list_namespaced_pod(namespace=service_name).items
-            if len(pods) > 0:
-                pods_exist = True
-            while pods_exist:
-                pods_exist = False
-                pods = v1.list_namespaced_pod(namespace=service_name).items
-                if len(pods) > 0:
-                    nameservice_exists = True
-                sleep(2)
-            
-            v1.delete_namespace(name=service_name)
+                        for service in corev1.list_namespaced_service(namespace=service_name).items: 
+                            if service.metadata.name == service_name:
+                                corev1.delete_namespaced_service(name=service, namespace=service_name) 
+                        
+                        #wait for pods to delete
+                        while True:
+                            if len(corev1.list_namespaced_pod(namespace=service_name).items) > 0:
+                                sleep(2)
+                            else:
+                                break
 
-            nameservice_exists = True
-            while nameservice_exists:
-                nameservice_exists = False
-                for namespace in v1.list_namespace().items:
-                    if namespace.metadata.name == service_name:
-                        sleep(2)
-                        nameservice_exists = True
+                        while True:
+                            try:
+                                _ = corev1.delete_namespace(service_name)
+                            except client.ApiException as e:
+                                if json.loads(e.body)['code'] == 404:
+                                    break
+                        return 'success'
+                    except:
+                        return None
+                else: 
+                    print(f"Service {service_name} doesn't exist.")
+                    return None
                         
         elif not self.local_test:    
-            print(f'DROP SERVICE IF EXISTS {service_name}')
-        else:
-            raise AttributeError('Invalid option for local_test')
-        
-        return None
+            try: 
+                self.run(f'DROP SERVICE IF EXISTS {service_name}')
+            except: 
+                return None
 
     def describe_service(self, service_name:str):
         response = {'pods': {}, 'services': {}, 'deployments': {}}
@@ -514,41 +535,35 @@ class SnowServicesHook(SnowflakeHook):
             from kubernetes import client, config
             config.load_kube_config()
                         
-            v1 = client.CoreV1Api()
+            corev1 = client.CoreV1Api()
             
-            for pod in v1.list_namespaced_pod(namespace=service_name).items: 
-                response['pods'][pod.metadata.name] = {'ip': pod.status.pod_ip, 'namespace':pod.metadata.namespace}
-
-            for service in v1.list_namespaced_service(namespace=service_name).items: 
-                if service.metadata.name == service_name:
-                    response['services'][service.metadata.name] = {'ingress_url': f'{service.status.load_balancer.ingress[0].hostname}:{service.spec.ports[0].target_port}'}
-
-            v1 = client.AppsV1Api()
-            for deployment in v1.list_namespaced_deployment(namespace=service_name).items: 
-                response['deployments'][deployment.metadata.name] = {'metadata': deployment.metadata.namespace}
-                
-        elif not self.local_test:    
-            #response = self.get_conn().cursor().execute(f'CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}').fetchall()
-            raise NotImplementedError()
-        else:
-            raise AttributeError('Invalid option for local_test')
-        
-        return response
+            for namespace in corev1.list_namespace().items:
+                if namespace.metadata.name == service_name:
+                    response['services'][service_name] = {'ingress_url': 'kubernetes.docker.internal:8001'}
+                    return response
+                else:
+                    print('Service does not exist.')
+                    return None
+            
+        elif not self.local_test:  
+            try:  
+                response = self.get_conn().cursor().execute(f'CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}').fetchall()
+                return response
+            except:
+                return None
             
     def get_runner_url(self, service_name: str): 
 
-        services = self.describe_service(service_name=service_name)['services']
-
-        if self.local_test == 'astro_cli' or self.local_test == 'docker_desktop_k8s':
-            return services[service_name]['ingress_url']
+        if self.local_test in ['astro_cli', 'docker_desktop_k8s']:
+            return self.describe_service(service_name=service_name)['services'][service_name]['ingress_url']
 
         elif not self.local_test:    
-
-            response = f"self.get_conn().cursor().execute(f'CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}').fetchall()"
-
-        else:
-            raise AttributeError('Invalid option for local_test')
-
+            try:
+                #response = self.get_conn().cursor().execute(f'CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}').fetchall()
+                response = f'http://{service_name}.schema_name.db_name.snowflakecomputing.internal'
+                return response
+            except:
+                return None
         
     def check_service(self, service_name:str):
 
@@ -557,3 +572,4 @@ class SnowServicesHook(SnowflakeHook):
         assert response.status_code == 200
         assert response.json() == "Pong."
         print(f'reponse is: {response}')
+        return 'success'
