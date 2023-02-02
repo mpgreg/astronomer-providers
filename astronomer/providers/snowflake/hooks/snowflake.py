@@ -207,16 +207,11 @@ class SnowServicesHook(SnowflakeHook):
     gpu_types = ['NvidiaA10', 'NvidiaTeslaV100', 'NvidiaAmpereA100']
 
     def __init__(self, *args, **kwargs) -> None:
-        self.snowflake_conn_id = kwargs.get("snowflake_conn_id")
-        self.conn_id = kwargs.get("conn_id")
+        super().__init__(*args, **kwargs)
         self.local_test = kwargs.get("local_test") or None
-
-        if self.local_test == '':
-            self.local_test = None 
 
         assert self.local_test in ['astro_cli', 'docker_desktop_k8s', None], f"Unrecognized option for local_test={self.local_test}.  Use 'astro_cli' or 'docker_desktop_k8s' or None."
 
-        super().__init__(*args, **kwargs)
 
     def create_pool(self, 
         pool_name : str, 

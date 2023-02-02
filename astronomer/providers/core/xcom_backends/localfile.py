@@ -141,12 +141,9 @@ class LocalFileXComBackend(BaseXCom):
         :return: 
         """
 
-        # result = BaseXCom.deserialize_value(result)
+        result = BaseXCom.deserialize_value(result)
         
-        # return LocalFileXComBackend._deserialize(result)
-        #return 'test_snowservices_dag/mytask/manual__2023-01-29T17:12:27.806448+00:00/return_value.parquet'
-        return None
-
+        return LocalFileXComBackend._deserialize(result)
 
 
 

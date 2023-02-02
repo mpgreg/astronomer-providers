@@ -375,33 +375,32 @@ class SnowflakeSqlApiOperatorAsync(SnowflakeOperator):
 
 class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
     """
-    Runs a function in a Snowservices service runner environment.  Provided dependencies 
-    will be installed and attempts will be made to reuse python environements across tasks 
-    within a dag.
+    Runs a function in a Snowservices service runner environment.  
 
-    The function must be defined using def, and not be part of a class. All imports must 
-    happen inside the function and no variables outside the scope may be referenced. All arguments to 
-    the function must be passed in the function signature. string_args, args and kwargs will not be passed.
+    The function must be defined using def, and not be
+    part of a class. All imports must happen inside the function
+    and no variables outside the scope may be referenced. A global scope
+    variable named virtualenv_string_args will be available (populated by
+    string_args). In addition, one can pass stuff through op_args and op_kwargs, and one
+    can use a return value.
     
-    ##TODO: 
+    ##TODO: update docs
     Task XCOMs will be saved in a Snowflake stage and return values to Airflow (plain xcom) will list 
     this stage location and filename (ie. @mystage/path/file).
 
     :param snowflake_conn_id: connection to use when running code within the Snowservices runner.
     :type snowflake_conn_id: str  (default is snowflake_default)
-    :param runner_endpoint: URL endpoint of the instantiated snowservice runner
+    :param runner_endpoint: URL endpoint of the instantiated snowservice runner (ie. ws://<hostnam>:<port>/<endpoint>)
     :type runner_endpoint: str
-    :param python_callable: A reference to an object that is callable
-    :param python: 'virtualenv' or a path to an existing python executable.  'virtualenv' will cause the 
-        snowservice runner to use PythonVirtualenvOperator.  Any other string will be interpreted as a python 
-        path for ExternalPythonOperator.
-    :param python_version: Python version to build if using 'virtualenv'. If set to None the runner will try to build 
-    a virtualenv based on the python version of the Airflow scheduler.  If 'python' param is not 'virtualenv' python_version is ignored.
+    :param python_callable: Function to decorate
+    :type python_callable: Callable 
+    :param python: Python version (ie. '<maj>.<min>').  Callable will run in a PythonVirtualenvOperator on the runner.  
+        If not set will use default python version on runner.
+    :type python: str:
+# :param python_version: Python version to build if using 'virtualenv'. If set to None the runner will try to build 
+# a virtualenv based on the python version of the Airflow scheduler.  If 'python' param is not 'virtualenv' python_version is ignored.
     :param requirements: Optional list of python dependencies or a path to a requirements.txt file to be installed for the callable.
     :type requirements: list | str
-    :param includes: Optional list of dictionaries of github repositories to include as dependencies.
-    Format: [{'type': 'git', 'name': '', 'git': {'vendor': '', 'repo': '', 'branch': '', 'sha': '', 'token': ''}}]
-    :type includes: list
     :param op_kwargs: a dictionary of keyword arguments that will get unpacked in your function (templated)
     :param op_args: a list of positional arguments that will get unpacked when calling your callable (templated)
     :param string_args: Strings that are present in the global var virtualenv_string_args,
@@ -423,11 +422,11 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
     def __init__(
         self,
         *,
-        snowflake_conn_id: str = 'snowflake_default',
         runner_endpoint: str, 
         python_callable: Callable,
-        python: str = 'virtualenv',
-        python_version: str | None = None,
+        snowflake_conn_id: str = 'snowflake_default',
+        python: str | None = None,
+        # python_version: str | None = None,
         requirements: None | Iterable[str] | str = None,
         use_dill: bool = False,
         system_site_packages: bool = True,
@@ -456,11 +455,11 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
         self.system_site_packages = system_site_packages
         self.pip_install_options = pip_install_options
         self.snowflake_conn_id = snowflake_conn_id
-        self.venv_python_version = python_version
-        self.source_python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        #self.venv_python_version = python_version
+        #self.source_python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
         self.use_dill = use_dill
-        self.hook = SnowServicesHook(conn_id=self.snowflake_conn_id)
-        self.snowflake_connection_uri = self.hook.get_uri()
+        self.hook = SnowServicesHook(snowflake_conn_id=self.snowflake_conn_id)
+        self.snowflake_connection_uri = self.hook.get_uri()  #TODO: get correct uri
         self.target_python = python
         self.expect_airflow = expect_airflow
         self.expect_pendulum = expect_pendulum
@@ -489,8 +488,8 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
             python_callable_name = self.python_callable.__name__,
             requirements = self.requirements,
             pip_install_options = self.pip_install_options,
-            venv_python_version = self.venv_python_version,
-            source_python_version = self.source_python_version, 
+            # venv_python_version = self.venv_python_version,
+            # source_python_version = self.source_python_version, 
             snowflake_connection_uri = self.snowflake_connection_uri,
             use_dill = self.use_dill,
             system_site_packages = self.system_site_packages,
