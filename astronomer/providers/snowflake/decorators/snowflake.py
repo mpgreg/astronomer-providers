@@ -45,9 +45,9 @@ class _SnowServicesDecoratedOperator(DecoratedOperator, SnowServicesPythonOperat
 
     custom_operator_name: str = "@task.snowservices_python"
 
-    def __init__(self, *, snowflake_conn_id, runner_endpoint, python_callable, python, op_args, op_kwargs, **kwargs) -> None:
+    def __init__(self, *, runner_endpoint, python_callable, python, op_args, op_kwargs, **kwargs) -> None:
         kwargs_to_upstream = {
-            "snowflake_conn_id": snowflake_conn_id, 
+            # "snowflake_conn_id": snowflake_conn_id, 
             "runner_endpoint": runner_endpoint,
             "python_callable": python_callable,
             "python": python,
@@ -72,7 +72,7 @@ class _SnowServicesDecoratedOperator(DecoratedOperator, SnowServicesPythonOperat
 
 def snowservices_task(
     runner_endpoint: str, 
-    snowflake_conn_id: str = 'snowflake_default',
+    # snowflake_conn_id: str = 'snowflake_default',
     python: str | None = None,
     python_callable: Callable | None = None,
     multiple_outputs: bool | None = None,
@@ -102,7 +102,7 @@ def snowservices_task(
     """
     return task_decorator_factory(
         runner_endpoint=runner_endpoint, 
-        snowflake_conn_id=snowflake_conn_id,
+        # snowflake_conn_id=snowflake_conn_id,
         python=python,
         python_callable=python_callable,
         multiple_outputs=multiple_outputs,

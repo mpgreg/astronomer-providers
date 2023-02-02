@@ -397,8 +397,6 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
     :param python: Python version (ie. '<maj>.<min>').  Callable will run in a PythonVirtualenvOperator on the runner.  
         If not set will use default python version on runner.
     :type python: str:
-# :param python_version: Python version to build if using 'virtualenv'. If set to None the runner will try to build 
-# a virtualenv based on the python version of the Airflow scheduler.  If 'python' param is not 'virtualenv' python_version is ignored.
     :param requirements: Optional list of python dependencies or a path to a requirements.txt file to be installed for the callable.
     :type requirements: list | str
     :param op_kwargs: a dictionary of keyword arguments that will get unpacked in your function (templated)
@@ -426,7 +424,6 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
         python_callable: Callable,
         snowflake_conn_id: str = 'snowflake_default',
         python: str | None = None,
-        # python_version: str | None = None,
         requirements: None | Iterable[str] | str = None,
         use_dill: bool = False,
         system_site_packages: bool = True,
@@ -455,8 +452,6 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
         self.system_site_packages = system_site_packages
         self.pip_install_options = pip_install_options
         self.snowflake_conn_id = snowflake_conn_id
-        #self.venv_python_version = python_version
-        #self.source_python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
         self.use_dill = use_dill
         self.hook = SnowServicesHook(snowflake_conn_id=self.snowflake_conn_id)
         self.snowflake_connection_uri = self.hook.get_uri()  #TODO: get correct uri
@@ -484,12 +479,10 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
     def _build_payload(self, context):
 
         payload = dict(
-            python_callable_str = dedent(inspect.getsource(self.python_callable)),
+            python_callable_str = self.get_python_source(), #dedent(inspect.getsource(self.python_callable)),
             python_callable_name = self.python_callable.__name__,
             requirements = self.requirements,
             pip_install_options = self.pip_install_options,
-            # venv_python_version = self.venv_python_version,
-            # source_python_version = self.source_python_version, 
             snowflake_connection_uri = self.snowflake_connection_uri,
             use_dill = self.use_dill,
             system_site_packages = self.system_site_packages,
@@ -521,22 +514,14 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
         serializable_keys = set(self._iter_serializable_context_keys())
         serializable_context = context_copy_partial(context, serializable_keys)
 
-
         self.payload = self._build_payload(context)
-
-        # import json
-        # with open(f'/tmp/{self.task_id}_payload.json', 'w') as f:
-        #     f.write(json.dumps(self.payload))
-
-        # with open(f'/tmp/{self.task_id}_context.json', 'w') as f:
-        #     f.write(json.dumps([context["ti"].xcom_pull(), context["ts"]]))
-
-
 
         return super().execute(context=serializable_context)
 
-    def execute_callable(self):
+    def execute_callable(self): #, context: Context):
         import asyncio
+
+        # self.payload = self._build_payload(context)
 
         responses =  asyncio.run(self._execute_python_callable_in_snowservices(self.payload))
 
@@ -544,8 +529,6 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
         
     async def _execute_python_callable_in_snowservices(self, payload):
         import aiohttp
-
-        # payload['xcom_input'] = context["ti"].xcom_pull()
 
         responses = []
         async with aiohttp.ClientSession() as session:
