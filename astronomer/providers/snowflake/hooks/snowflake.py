@@ -176,6 +176,7 @@ class SnowServicesHook(SnowflakeHook):
     :type conn_id: str
     :param account: snowflake account name
     :type account: str
+    TODO: test authenticator
     :param authenticator: authenticator for Snowflake.
         'snowflake' (default) to use the internal Snowflake authenticator
         'externalbrowser' to authenticate using your web browser and
@@ -212,6 +213,49 @@ class SnowServicesHook(SnowflakeHook):
 
         assert self.local_test in ['astro_cli', 'docker_desktop_k8s', None], f"Unrecognized option for local_test={self.local_test}.  Use 'astro_cli' or 'docker_desktop_k8s' or None."
 
+    def _get_uri_from_conn_params(self) -> str:
+        """
+        Returns a URI for snowflake connection environment variable.
+        conn_params_str = SnowServicesHook()._get_uri_from_conn_params()
+        os.environ['AIRFLOW_CONN_SNOWFLAKE_MYCONN'] = conn_params_str
+        SnowServicesHook(snowflake_conn_id='SNOWFLAKE_MYCONN').test_connection()
+        """
+        conn_params = self._get_conn_params()
+        return f"snowflake://{conn_params['user']}:\
+                             {conn_params['password']}@/\
+                             {conn_params['schema']}\
+                             ?account={conn_params['account']}\
+                             &region={conn_params['region']}\
+                             &database={conn_params['database']}\
+                             @warehouse={conn_params['warehouse']}".replace(' ','')
+    
+    def _get_json_from_conn_params(self) -> str:
+        """
+        Returns a json object which can be used as an environment variable for snowflake connections.
+        example: 
+            conn_params_str = SnowServicesHook()._get_json_from_conn_params()
+            os.environ['AIRFLOW_CONN_SNOWFLAKE_MYCONN'] = conn_params_str
+            SnowServicesHook(snowflake_conn_id='SNOWFLAKE_MYCONN').test_connection()
+        """
+        conn_params = self._get_conn_params()
+        return f'{{\
+            "conn_type": "snowflake",\
+            "login": "{conn_params["user"]}",\
+            "password": "{conn_params["password"]}",\
+            "schema": "{conn_params.get("schema", "")}",\
+            "extra": {{\
+                "account": "{conn_params.get("account", "")}",\
+                "database": "{conn_params.get("database", "")}",\
+                "region": "{conn_params.get("region", "")}",\
+                "warehouse": "{conn_params.get("warehouse", "")}",\
+                "role": "{conn_params.get("role", "")}",\
+                "authenticator": "{conn_params.get("authenticator", "")}",\
+                "private_key_file": "{conn_params.get("private_key_file", "")}",\
+                "private_key_content": "{conn_params.get("private_key_content", "")}",\
+                "session_parameters": "{conn_params.get("session_parameters", "")}",\
+                "insecure_mode": "{conn_params.get("insecure_mode", "")}"\
+            }}\
+        }}'.replace(' ', '')
 
     def create_pool(self, 
         pool_name : str, 
@@ -255,7 +299,7 @@ class SnowServicesHook(SnowflakeHook):
 
             replace_existing_str = ' IF NOT EXISTS ' if not replace_existing else ''
 
-            self.run(
+            print(
                 f"CREATE COMPUTE POOL {replace_existing_str} {pool_name} \
                     MIN_NODES = {min_nodes} \
                     MAX_NODES = {max_nodes} \
@@ -276,7 +320,7 @@ class SnowServicesHook(SnowflakeHook):
         
         if not self.local_test:    
             force_all = 'true' if force_all else 'false'
-            self.run(
+            print(
                 f"ALTER SESSION SET COMPUTE_POOL_FORCE_DELETE_ALL_SNOWSERVICES_ON_DROP = {force_all}; \
                     DROP COMPUTE POOL {pool_name};"
             )
@@ -426,7 +470,7 @@ class SnowServicesHook(SnowflakeHook):
                 yaml.dump_all(k8s_spec, f, default_flow_style=False)
 
             try:
-                self.run( f"CREATE TEMPORARY STAGE {temp_stage_name}; \
+                print( f"CREATE TEMPORARY STAGE {temp_stage_name}; \
                             PUT file://{spec_file_name} @{temp_stage_name} \
                                 AUTO_COMPRESS = False \
                                 SOURCE_COMPRESSION = NONE \
@@ -449,7 +493,7 @@ class SnowServicesHook(SnowflakeHook):
             return 'success'
         elif not self.local_test: 
             try:   
-                self.run(f'ALTER SERVICE IF EXISTS {service_name} SUSPEND')
+                print(f'ALTER SERVICE IF EXISTS {service_name} SUSPEND')
                 return 'success'
             except: 
                 return None
@@ -460,7 +504,7 @@ class SnowServicesHook(SnowflakeHook):
             return 'success'
         elif not self.local_test:    
             try:
-                self.run(f'ALTER SERVICE IF EXISTS {service_name} RESUME')
+                print(f'ALTER SERVICE IF EXISTS {service_name} RESUME')
                 return 'success'
             except:
                 return None
@@ -515,7 +559,7 @@ class SnowServicesHook(SnowflakeHook):
                         
         elif not self.local_test:    
             try: 
-                self.run(f'DROP SERVICE IF EXISTS {service_name}')
+                print(f'DROP SERVICE IF EXISTS {service_name}')
             except: 
                 return None
 

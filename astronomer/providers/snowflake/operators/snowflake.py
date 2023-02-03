@@ -449,12 +449,13 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
         else:
             self.requirements = list(requirements)
         
+        hook = SnowServicesHook(snowflake_conn_id=snowflake_conn_id)
+
         self.system_site_packages = system_site_packages
         self.pip_install_options = pip_install_options
-        self.snowflake_conn_id = snowflake_conn_id
+        # self.snowflake_conn_id = snowflake_conn_id
         self.use_dill = use_dill
-        self.hook = SnowServicesHook(snowflake_conn_id=self.snowflake_conn_id)
-        self.snowflake_connection_uri = self.hook.get_uri()  #TODO: get correct uri
+        self.AIRFLOW_CONN_SNOWFLAKE_USER = hook._get_uri_from_conn_params()
         self.target_python = python
         self.expect_airflow = expect_airflow
         self.expect_pendulum = expect_pendulum
@@ -483,7 +484,7 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
             python_callable_name = self.python_callable.__name__,
             requirements = self.requirements,
             pip_install_options = self.pip_install_options,
-            snowflake_connection_uri = self.snowflake_connection_uri,
+            AIRFLOW_CONN_SNOWFLAKE_USER = self.AIRFLOW_CONN_SNOWFLAKE_USER,
             use_dill = self.use_dill,
             system_site_packages = self.system_site_packages,
             target_python = self.target_python,
