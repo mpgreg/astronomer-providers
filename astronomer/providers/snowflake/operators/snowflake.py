@@ -453,7 +453,6 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
 
         self.system_site_packages = system_site_packages
         self.pip_install_options = pip_install_options
-        # self.snowflake_conn_id = snowflake_conn_id
         self.use_dill = use_dill
         self.AIRFLOW_CONN_SNOWFLAKE_USER = hook._get_uri_from_conn_params()
         self.target_python = python

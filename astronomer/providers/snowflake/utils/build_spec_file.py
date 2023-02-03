@@ -50,7 +50,7 @@ def create_k8s_spec(
                         'args': [], 
                         'command': [], 
                         'env': [{'name': 'AIRFLOW__CORE__XCOM_BACKEND', 
-                                 'value': 'backends.local.localfile_xcom_backend.LocalFileXComBackend'},
+                                 'value': 'astronomer.providers.core.xcom_backends.localfile.LocalFileXComBackend'},
                                 {'name': 'AIRFLOW__CORE__XCOM_LOCALFILE_DIR', 
                                  'value': '/xcom'}], 
                         'ports': [{'containerPort': runner_port, 'protocol': 'TCP'}], 
@@ -90,7 +90,7 @@ def create_k8s_spec(
                     'AIRFLOW__CORE__LOAD_EXAMPLES:False',
                     'AIRFLOW__CORE__ENABLE_XCOM_PICKLING:True',
                     'PYTHONUNBUFFERED:1',
-                    'AIRFLOW__CORE__XCOM_BACKEND:backends.local.localfile_xcom_backend.LocalFileXComBackend',
+                    'AIRFLOW__CORE__XCOM_BACKEND:astronomer.providers.core.xcom_backends.localfile.LocalFileXComBackend',
                     'AIRFLOW__CORE__XCOM_LOCALFILE_DIR:/xcom',
                 ]
             }

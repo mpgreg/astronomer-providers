@@ -300,11 +300,11 @@ class SnowServicesHook(SnowflakeHook):
             replace_existing_str = ' IF NOT EXISTS ' if not replace_existing else ''
 
             print(
-                f"CREATE COMPUTE POOL {replace_existing_str} {pool_name} \
+                ' '.join(f"CREATE COMPUTE POOL {replace_existing_str} {pool_name} \
                     MIN_NODES = {min_nodes} \
                     MAX_NODES = {max_nodes} \
                     INSTANCE_FAMILY = {instance_family} \
-                    {gpu_option_str};"
+                    {gpu_option_str};".split())
             )
 
         return pool_name
@@ -321,8 +321,8 @@ class SnowServicesHook(SnowflakeHook):
         if not self.local_test:    
             force_all = 'true' if force_all else 'false'
             print(
-                f"ALTER SESSION SET COMPUTE_POOL_FORCE_DELETE_ALL_SNOWSERVICES_ON_DROP = {force_all}; \
-                    DROP COMPUTE POOL {pool_name};"
+                ' '.join(f"ALTER SESSION SET COMPUTE_POOL_FORCE_DELETE_ALL_SNOWSERVICES_ON_DROP = {force_all}; \
+                    DROP COMPUTE POOL {pool_name};".split())
             )
 
         
@@ -349,7 +349,8 @@ class SnowServicesHook(SnowflakeHook):
             if limit:
                 limit_str = f" LIMIT {limit} "
 
-            response = self.get_conn().cursor().execute(f"SHOW COMPUTE POOLS {like_str} {prefix_str} {limit_str};").fetchall()
+            # response = self.get_conn().cursor().execute(f"SHOW COMPUTE POOLS {like_str} {prefix_str} {limit_str};").fetchall()
+            response = print(f"SHOW COMPUTE POOLS {like_str} {prefix_str} {limit_str};")
             return response
         else:
             return None
@@ -417,14 +418,6 @@ class SnowServicesHook(SnowflakeHook):
             from kubernetes import client, config, utils
 
             config.load_kube_config()
-
-            # if not spec_file_name:                    
-            #     k8s_spec: list = create_k8s_spec(service_name=service_name, 
-            #                                runner_endpoint=runner_endpoint,
-            #                                runner_port=runner_port,
-            #                                runner_image=runner_image,
-            #                                local_test=self.local_test,
-            #                                )
             
             #create a namespace for this service and deploy services
             metadata_obj = client.V1ObjectMeta(name=service_name, namespace=service_name)
@@ -456,38 +449,33 @@ class SnowServicesHook(SnowflakeHook):
             
             temp_stage_postfix = str(uuid4()).replace('-','_')
             temp_stage_name = f'{service_name}_{temp_stage_postfix}'
+            temp_spec_file_name = f'{temp_stage_name}_spec.yml'                    
 
-            if not spec_file_name:
-                k8s_spec: list = create_k8s_spec(service_name=service_name, 
-                                           runner_endpoint=runner_endpoint,
-                                           runner_port=runner_port,
-                                           runner_image=runner_image,
-                                           )
-
-            spec_file_name = f'{temp_stage_name}_spec.yml'                    
-
-            with open(spec_file_name, 'w') as f:
+            with open(temp_spec_file_name, 'w') as f:
                 yaml.dump_all(k8s_spec, f, default_flow_style=False)
 
             try:
-                print( f"CREATE TEMPORARY STAGE {temp_stage_name}; \
-                            PUT file://{spec_file_name} @{temp_stage_name} \
+                print(
+                    ' '.join(f"CREATE TEMPORARY STAGE {temp_stage_name}; \
+                            PUT file://{temp_spec_file_name} @{temp_stage_name} \
                                 AUTO_COMPRESS = False \
-                                SOURCE_COMPRESSION = NONE \
+                                SOURCE_COMPRESSION = NONE; \
                             CREATE SERVICE {replace_existing_str} {service_name} \
                                 MIN_INSTANCES = {min_inst} \
                                 MAX_INSTANCES = {max_inst} \
                                 COMPUTE_POOL = {pool_name} \
-                                SPEC = @{temp_stage_name}/{spec_file_name};")
+                                SPEC = @{temp_stage_name}/{temp_spec_file_name};".split())
+                )
             except:
                 return None
                 
-            os.remove(spec_file_name)
+            os.remove(temp_spec_file_name)
     
             ##TODO: need wait loop or asycn operation to make sure it is up
 
 
     def suspend_service(self, service_name:str):
+        ##TODO: need wait loop or asycn operation to make sure it is up
         if self.local_test in ['astro_cli', 'docker_desktop_k8s']:
             print('No suspend option in local testing mode.')
             return 'success'
@@ -499,6 +487,7 @@ class SnowServicesHook(SnowflakeHook):
                 return None
 
     def resume_service(self, service_name:str):
+        ##TODO: need wait loop or asycn operation to make sure it is up
         if self.local_test in ['astro_cli', 'docker_desktop_k8s']:
             print('No resume option in local testing mode.')
             return 'success'
@@ -510,6 +499,7 @@ class SnowServicesHook(SnowflakeHook):
                 return None
 
     def remove_service(self, service_name:str):
+        ##TODO: need wait loop or asycn operation to make sure it is up
         if self.local_test == 'astro_cli':
             print('Remove service via Astro CLI.')
             return 'success'
@@ -563,11 +553,12 @@ class SnowServicesHook(SnowflakeHook):
             except: 
                 return None
 
-    def describe_service(self, service_name:str):
-        response = {'pods': {}, 'services': {}, 'deployments': {}}
+    def describe_service(self, service_name:str) -> dict:
+        # response = {'pods': {}, 'services': {}, 'deployments': {}}
 
         if self.local_test == 'astro_cli':
-            response['services'][service_name] = {'ingress_url': 'host.docker.internal:8001'}
+            # response['services'][service_name] = {'ingress_url': 'host.docker.internal:8001'}
+            response = {'ingress_url': 'host.docker.internal:8001'}
             return response
 
         elif self.local_test == 'docker_desktop_k8s':
@@ -578,7 +569,8 @@ class SnowServicesHook(SnowflakeHook):
             
             for namespace in corev1.list_namespace().items:
                 if namespace.metadata.name == service_name:
-                    response['services'][service_name] = {'ingress_url': 'kubernetes.docker.internal:8001'}
+                    # response['services'][service_name] = {'ingress_url': 'kubernetes.docker.internal:8001'}
+                    response = {'ingress_url': 'kubernetes.docker.internal:8001'}
                     return response
                 else:
                     print('Service does not exist.')
@@ -586,7 +578,9 @@ class SnowServicesHook(SnowflakeHook):
             
         elif not self.local_test:  
             try:  
-                response = self.get_conn().cursor().execute(f'CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}').fetchall()
+                # response = self.get_conn().cursor().execute(f'CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}').fetchall()
+                print(f"CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}")
+                response = {'ingress_url': 'localhost:8001'}
                 return response
             except:
                 return None
@@ -594,10 +588,11 @@ class SnowServicesHook(SnowflakeHook):
     def get_runner_url(self, service_name: str): 
 
         if self.local_test in ['astro_cli', 'docker_desktop_k8s']:
-            return self.describe_service(service_name=service_name)['services'][service_name]['ingress_url']
+            return self.describe_service(service_name=service_name)['ingress_url']
 
         elif not self.local_test:    
             try:
+                #TODO: what is correct url?
                 #response = self.get_conn().cursor().execute(f'CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}').fetchall()
                 response = f'http://{service_name}.schema_name.db_name.snowflakecomputing.internal'
                 return response
