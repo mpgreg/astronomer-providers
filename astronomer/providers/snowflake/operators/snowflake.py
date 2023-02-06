@@ -426,7 +426,7 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
         python: str | None = None,
         requirements: None | Iterable[str] | str = None,
         use_dill: bool = False,
-        system_site_packages: bool = True,
+        # system_site_packages: bool = True,
         pip_install_options: list[str] | None = None,
         op_args: Collection[Any] | None = None,
         op_kwargs: Mapping[str, Any] | None = None,
@@ -451,7 +451,7 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
         
         hook = SnowServicesHook(snowflake_conn_id=snowflake_conn_id)
 
-        self.system_site_packages = system_site_packages
+        # self.system_site_packages = system_site_packages
         self.pip_install_options = pip_install_options
         self.use_dill = use_dill
         self.AIRFLOW_CONN_SNOWFLAKE_USER = hook._get_uri_from_conn_params()
@@ -497,7 +497,7 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
             expect_airflow = self.expect_airflow,
             expect_pendulum = self.expect_pendulum,
             string_args = self.string_args,
-            xcom_input = context["ti"].xcom_pull(),
+            # xcom_input = context["ti"].xcom_pull(),
         )
         
         return payload
