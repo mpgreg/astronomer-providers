@@ -204,8 +204,8 @@ class SnowServicesHook(SnowflakeHook):
     default_conn_name = "snowflake_default"
     conn_type = "snowflake"
     hook_name = "SnowServicesHook"
-    instance_types = ['standard_1', 'standard_2', 'standard_3', 'standard_4', 'standard_5']
-    gpu_types = ['NvidiaA10', 'NvidiaTeslaV100', 'NvidiaAmpereA100']
+    instance_types = ['STANDARD_1', 'STANDARD_2', 'STANDARD_3', 'STANDARD_4', 'STANDARD_5']
+    gpu_types = ['NVIDIAA10', 'NVIDIATESLAV100', 'NVIDIAAMPEREA100']
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -279,15 +279,15 @@ class SnowServicesHook(SnowflakeHook):
         :type min_nodes: int
         :param max_nodes: The maximum number of nodes to scale to
         :type max_nodes: int
-        :param gpu_name: Whether to use GPU nodes (currently limited to NVIDIAA10G)
+        :param gpu_name: Whether to use GPU nodes (ie. NvidiaA10)
         :type gpu_name: str
         """
 
         if not self.local_test:
-            if gpu_name and gpu_name.lower() not in self.gpu_types:
+            if gpu_name and gpu_name.upper() not in self.gpu_types:
                 raise AttributeError(f"Unsupported option {gpu_name} specified for gpu_name.")
 
-            if instance_family and instance_family.lower() not in self.instance_types:
+            if instance_family and instance_family.upper() not in self.instance_types:
                 raise AttributeError(f"Unsupported option {instance_family} specified for instance_family.")
 
             gpu_option_str = ''
