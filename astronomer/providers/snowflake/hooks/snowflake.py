@@ -215,6 +215,9 @@ class SnowServicesHook(SnowflakeHook):
 
     def _get_uri_from_conn_params(self) -> str:
         """
+
+        TODO: add session parameters and oath options
+        
         Returns a URI for snowflake connection environment variable.
         conn_params_str = SnowServicesHook()._get_uri_from_conn_params()
         os.environ['AIRFLOW_CONN_SNOWFLAKE_MYCONN'] = conn_params_str
@@ -227,7 +230,8 @@ class SnowServicesHook(SnowflakeHook):
                              ?account={conn_params['account']}\
                              &region={conn_params['region']}\
                              &database={conn_params['database']}\
-                             @warehouse={conn_params['warehouse']}".replace(' ','')
+                             &warehouse={conn_params['warehouse']}\
+                             &role={conn_params['role']}".replace(' ','')
     
     def _get_json_from_conn_params(self) -> str:
         """
