@@ -128,8 +128,8 @@ class LocalFileXComBackend(BaseXCom):
         :return: The file key byte encoded string.
         :rtype: str
         """
-
-        value: str = LocalFileXComBackend._serialize(value=value, key=key, dag_id=dag_id, task_id=task_id, run_id=run_id)
+        if value:
+            value: str = LocalFileXComBackend._serialize(value=value, key=key, dag_id=dag_id, task_id=task_id, run_id=run_id)
         
         return BaseXCom.serialize_value(value)
 
