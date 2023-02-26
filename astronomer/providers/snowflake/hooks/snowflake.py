@@ -7,9 +7,11 @@ from typing import Any, Callable
 import json
 import yaml
 from uuid import uuid4
-import os
 import requests
-
+from pathlib import Path
+import tempfile
+import os
+import warnings
 
 from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
 from asgiref.sync import sync_to_async
@@ -19,7 +21,18 @@ from snowflake.connector.constants import QueryStatus
 from snowflake.connector.cursor import SnowflakeCursor
 from snowflake.connector.util_text import split_statements
 
-from astronomer.providers.snowflake.utils.build_spec_file import create_k8s_spec
+from astronomer.providers.snowflake.utils.helpers import SnowService
+
+try:
+    from astronomer.providers.snowflake.utils.astro_cli_docker_helpers import (
+        docker_compose_up, 
+        docker_compose_ps,
+        docker_compose_kill,
+        docker_compose_pause,
+        docker_compose_unpause
+    )# noqa
+except:
+    warnings.warn("The docker-compose package is not installed.")
 
 
 def fetch_all_snowflake_handler(
@@ -176,15 +189,6 @@ class SnowServicesHook(SnowflakeHook):
     :type conn_id: str
     :param account: snowflake account name
     :type account: str
-    TODO: test authenticator
-    :param authenticator: authenticator for Snowflake.
-        'snowflake' (default) to use the internal Snowflake authenticator
-        'externalbrowser' to authenticate using your web browser and
-        Okta, ADFS or any other SAML 2.0-compliant identify provider
-        (IdP) that has been defined for your account
-        'https://<your_okta_account_name>.okta.com' to authenticate
-        through native Okta.
-    :type authenticator: str
     :param warehouse: name of snowflake warehouse
     :type warehouse: str
     :param database: name of snowflake database
@@ -198,6 +202,18 @@ class SnowServicesHook(SnowflakeHook):
     :param session_parameters: You can set session-level parameters at
         the time you connect to Snowflake
     :type session_parameters: str
+    TODO: test authenticator
+    :param authenticator: authenticator for Snowflake.
+        'snowflake' (default) to use the internal Snowflake authenticator
+        'externalbrowser' to authenticate using your web browser and
+        Okta, ADFS or any other SAML 2.0-compliant identify provider
+        (IdP) that has been defined for your account
+        'https://<your_okta_account_name>.okta.com' to authenticate
+        through native Okta.
+    :type authenticator: str
+    :param local_test: Optionally deploy services as local containers for development 
+        before deploying. Current options are: 'astro_cli'
+    :type local_test: str
     """
 
     conn_name_attr = "snowflake_conn_id"
@@ -206,23 +222,31 @@ class SnowServicesHook(SnowflakeHook):
     hook_name = "SnowServicesHook"
     instance_types = ['STANDARD_1', 'STANDARD_2', 'STANDARD_3', 'STANDARD_4', 'STANDARD_5']
     gpu_types = ['NVIDIAA10', 'NVIDIATESLAV100', 'NVIDIAAMPEREA100']
+    local_modes = ['astro_cli', None]
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.local_test = kwargs.get("local_test") or None
 
-        assert self.local_test in ['astro_cli', 'docker_desktop_k8s', None], f"Unrecognized option for local_test={self.local_test}.  Use 'astro_cli' or 'docker_desktop_k8s' or None."
+        if self.local_test:
+            try:
+                Path('/var/run/docker.sock').stat()
+            except Exception as e:
+                if isinstance(e, FileNotFoundError):
+                    raise AttributeError('It looks like you are trying to run SnowServicesHook with local_test mode from a Docker container. To avoid a docker-in-docker inception problem please run local_test mode from non-containerized python.')
+
+        assert self.local_test in self.local_modes, \
+            f"Unrecognized option for local_test={self.local_test}.  Current options are: {self.local_modes}."
 
     def _get_uri_from_conn_params(self) -> str:
         """
-
-        TODO: add session parameters and oath options
-        
         Returns a URI for snowflake connection environment variable.
         conn_params_str = SnowServicesHook()._get_uri_from_conn_params()
         os.environ['AIRFLOW_CONN_SNOWFLAKE_MYCONN'] = conn_params_str
         SnowServicesHook(snowflake_conn_id='SNOWFLAKE_MYCONN').test_connection()
         """
+
+        #TODO: add session parameters and oath options
         conn_params = self._get_conn_params()
         return f"snowflake://{conn_params['user']}:\
                              {conn_params['password']}@/\
@@ -361,14 +385,17 @@ class SnowServicesHook(SnowflakeHook):
 
     def create_service(self, 
         service_name : str, 
-        pool_name: str, 
-        runner_endpoint: str | None = None,
-        runner_port: int | None = None,
-        runner_image: str | None = None,
+        pool_name: str = None, 
+        service_type: str = None, 
+        runner_endpoint_name: str = None,
+        runner_port: int = None,
+        runner_image_uri: str = None,
         spec_file_name : str = None,
         replace_existing: bool = False, 
         min_inst = 1, 
-        max_inst = 1) -> str:
+        max_inst = 1
+        ) -> str:
+        
         """
         Create (or replace an existing) Snowservice using a build-runner.
 
@@ -376,12 +403,15 @@ class SnowServicesHook(SnowflakeHook):
         :type service_name: str
         :param pool_name: Compute pool to use for service execution
         :type pool_name: str
-        :param runner_endpoint: Endpoint name for the snowservice runner.
-        :type runner_endpoint: str
-        :param runner_port: Port number (int) for the snowservice runner.
+        :param service_type: Specify 'airflow-runner' to use defaults for runner.
+        :type service_type: str
+        :param runner_endpoint_name: Endpoint name for the snowservice airflow runner.  
+        If not set use service_name as runner_endpoint_name.
+        :type runner_endpoint_name: str
+        :param runner_port: Port number (int) for the snowservice runner. Default 8081
         :type runner_port: int
-        :param runner_image: Name of Docker image to use for the runner.
-        :type runner_image: str
+        :param runner_image_uri: Name of Docker image to use for the service.
+        :type runner_image_uri: str
         :param replace_existing: Whether an existing service should be replaced or exit with failure.
         :type replace_existing: bool
         :param min_inst: The minimum number of nodes for scaling group
@@ -391,196 +421,199 @@ class SnowServicesHook(SnowflakeHook):
         :param spec_file_name: Optional path to an existing YAML specification for the service
         :type spec_file: str
         """
-        if spec_file_name:
-            if runner_endpoint or runner_port:
-                runner_endpoint = runner_port = None
-                raise Warning('Both spec_file_name and runner_endpoint / runner_port parameters provided. endpoint/port will be ignored.')
-            if not os.access(spec_file_name, os.F_OK | os.R_OK):
-                raise FileExistsError(f"Spec file {spec_file_name} does not exist or is not readable.")
-            else:
-                with open(spec_file_name, 'r') as f:
-                    try:
-                        k8s_spec: list = []
-                        for doc in yaml.safe_load_all(f):
-                            k8s_spec.append(json.dumps(doc))
-                    except yaml.YAMLError as exception:
-                        raise exception
-        else:
-            k8s_spec: list = create_k8s_spec(
-                                service_name=service_name, 
-                                runner_endpoint=runner_endpoint,
-                                runner_port=runner_port,
-                                runner_image=runner_image,
-                                local_test=self.local_test,
-                                )
+            
+        snowservice = SnowService(
+            service_name = service_name, 
+            pool_name = pool_name, 
+            service_type = service_type, 
+            runner_endpoint_name = runner_endpoint_name,
+            runner_port = runner_port,
+            runner_image_uri = runner_image_uri,
+            spec_file_name = spec_file_name,
+            replace_existing = replace_existing, 
+            min_inst = min_inst, 
+            max_inst = max_inst,
+            local_test = self.local_test
+        )
 
         if self.local_test == 'astro_cli':
-            print('Create service via astro cli and docker-compose-override.yml. Doing nothing.')
-            return service_name
-
-        elif self.local_test == 'docker_desktop_k8s':
-            from kubernetes import client, config, utils
-
-            config.load_kube_config()
-            
-            #create a namespace for this service and deploy services
-            metadata_obj = client.V1ObjectMeta(name=service_name, namespace=service_name)
-            namespace_obj = client.V1Namespace(metadata=metadata_obj)
-            corev1 = client.CoreV1Api()
-
-            for namespace in corev1.list_namespace().items:
-                if namespace.metadata.name == service_name:
-                    print(f"Service {service_name} already exists.")
-
-                    if not replace_existing:
-                        print('Using existing service.')
-                        return service_name
-                    else:
-                        self.remove_service(service_name=service_name)
-                        
-            apiv1 = client.ApiClient()
-            try:
-                corev1.create_namespace(namespace_obj)
-                for doc in k8s_spec:
-                    utils.create_from_dict(apiv1, doc, namespace=service_name)
-                return service_name
-            except:
-                self.remove_service(service_name=service_name)
-                raise utils.FailToCreateError(f'Could not create pods in service {service_name}')
-            
-        elif not self.local_test:  
-            replace_existing_str = ' IF NOT EXISTS ' if not replace_existing else ''
-            
-            temp_stage_postfix = str(uuid4()).replace('-','_')
-            temp_stage_name = f'{service_name}_{temp_stage_postfix}'
-            temp_spec_file_name = f'{temp_stage_name}_spec.yml'                    
-
-            with open(temp_spec_file_name, 'w') as f:
-                yaml.dump_all(k8s_spec, f, default_flow_style=False)
 
             try:
-                print(
-                    ' '.join(f"CREATE TEMPORARY STAGE {temp_stage_name}; \
-                            PUT file://{temp_spec_file_name} @{temp_stage_name} \
-                                AUTO_COMPRESS = False \
-                                SOURCE_COMPRESSION = NONE; \
-                            CREATE SERVICE {replace_existing_str} {service_name} \
-                                MIN_INSTANCES = {min_inst} \
-                                MAX_INSTANCES = {max_inst} \
-                                COMPUTE_POOL = {pool_name} \
-                                SPEC = @{temp_stage_name}/{temp_spec_file_name};".split())
-                )
+                local_service_spec = snowservice.services_spec['local']
             except:
-                return None
+                raise AttributeError('Provided spec does not include local docker compose specs.')
+
+            try: 
                 
-            os.remove(temp_spec_file_name)
+                services = docker_compose_ps(local_service_spec=local_service_spec, status='running')
+                
+                if len(services) > 0 and not replace_existing:
+                    warnings.warn('Services currently running but replace_existing=False.  Not recreating')
+
+                docker_compose_up(local_service_spec=local_service_spec, replace_existing=replace_existing)
+            except:
+                raise()
+
+            return service_name
+            
+        else:
+            try:
+                snowservice_service_spec = snowservice.services_spec['snowservice']
+            except:
+                raise AttributeError('Provided spec does not include snowservice docker compose specs.')
+
+            with tempfile.NamedTemporaryFile(mode='w+', dir=os.getcwd(), suffix='_spec.yml') as tf:
+                temp_spec_file = Path(tf.name)
+                spec_string = yaml.dump(snowservice_service_spec, default_flow_style=False)
+                _ = temp_spec_file.write_text(spec_string)
+
+                replace_existing_str = ' IF NOT EXISTS ' if not replace_existing else ''
+            
+                temp_stage_postfix = str(uuid4()).replace('-','_')
+                temp_stage_name = f'{service_name}_{temp_stage_postfix}'
+                # temp_spec_file_name = f'{temp_stage_name}_spec.yml'                    
+
+                try:
+                    print(
+                        ' '.join(f"CREATE TEMPORARY STAGE {temp_stage_name}; \
+                                PUT file://{temp_spec_file.as_posix()} @{temp_stage_name} \
+                                    AUTO_COMPRESS = False \
+                                    SOURCE_COMPRESSION = NONE; \
+                                CREATE SERVICE {replace_existing_str} {service_name} \
+                                    MIN_INSTANCES = {min_inst} \
+                                    MAX_INSTANCES = {max_inst} \
+                                    COMPUTE_POOL = {pool_name} \
+                                    SPEC = @{temp_stage_name}/{temp_spec_file.name};".split())
+                    )
+                except:
+                    print()
+                    return None
     
             ##TODO: need wait loop or asycn operation to make sure it is up
 
 
-    def suspend_service(self, service_name:str):
-        ##TODO: need wait loop or asycn operation to make sure it is up
-        if self.local_test in ['astro_cli', 'docker_desktop_k8s']:
-            print('No suspend option in local testing mode.')
-            return 'success'
-        elif not self.local_test: 
+    def suspend_service(self, service_name:str, service_type: str = None, spec_file_name:str = None):
+
+        if self.local_test == 'astro_cli':
+
+            snowservice = SnowService(
+                service_name = service_name, 
+                service_type = service_type,
+                spec_file_name = spec_file_name,
+                local_test = self.local_test,
+            )
+
+            try:
+                local_service_spec = snowservice.services_spec['local']
+            except:
+                raise AttributeError('Provided spec does not include local docker compose specs.')
+
+            try: 
+                
+                services = docker_compose_ps(local_service_spec=local_service_spec, status='running')
+                
+                if len(services) <= 0:
+                    warnings.warn('Services do not appear to be running.')
+                else:
+                    docker_compose_pause(local_service_spec=local_service_spec)
+                    return 'success'
+
+            except:
+                return 'failed'
+            
+        else: 
             try:   
                 print(f'ALTER SERVICE IF EXISTS {service_name} SUSPEND')
                 return 'success'
             except: 
-                return None
+                return 'failed'
 
-    def resume_service(self, service_name:str):
-        ##TODO: need wait loop or asycn operation to make sure it is up
-        if self.local_test in ['astro_cli', 'docker_desktop_k8s']:
-            print('No resume option in local testing mode.')
-            return 'success'
-        elif not self.local_test:    
+    def resume_service(self, service_name:str, service_type: str = None, spec_file_name:str = None):
+
+        if self.local_test == 'astro_cli':
+
+            snowservice = SnowService(
+                service_name = service_name, 
+                service_type = service_type,
+                spec_file_name = spec_file_name,
+                local_test = self.local_test,
+            )
+
+            try:
+                local_service_spec = snowservice.services_spec['local']
+            except:
+                raise AttributeError('Provided spec does not include local docker compose specs.')
+
+            try: 
+                
+                services = docker_compose_ps(local_service_spec=local_service_spec, status='paused')
+                
+                if len(services) <= 0:
+                    warnings.warn('Services do not appear to be paused.')
+                else:
+                    docker_compose_unpause(local_service_spec=local_service_spec)
+                    return 'success'
+            except:
+                return 'failed'
+
+        else: 
             try:
                 print(f'ALTER SERVICE IF EXISTS {service_name} RESUME')
                 return 'success'
             except:
-                return None
+                return 'failed'
 
-    def remove_service(self, service_name:str):
-        ##TODO: need wait loop or asycn operation to make sure it is up
+    def remove_service(self, service_name:str, service_type: str = None, spec_file_name:str = None):
+
         if self.local_test == 'astro_cli':
-            print('Remove service via Astro CLI.')
-            return 'success'
 
-        elif self.local_test == 'docker_desktop_k8s':
-            from kubernetes import client, config
-            from time import sleep
-            config.load_kube_config()
-            metadata_obj = client.V1ObjectMeta(name=service_name, namespace=service_name)
-            namespace_obj = client.V1Namespace(metadata=metadata_obj)
-            corev1 = client.CoreV1Api()
-            appsv1 = client.AppsV1Api()
+            snowservice = SnowService(
+                service_name = service_name, 
+                service_type = service_type,
+                spec_file_name = spec_file_name,
+                local_test = self.local_test,
+            )
 
-            for namespace in corev1.list_namespace().items:
-                if namespace.metadata.name == service_name:
-                    try:
-                        #could just delete namespace but faster to delete objects first
-                        for deployment in appsv1.list_namespaced_deployment(namespace=service_name).items: 
-                            appsv1.delete_namespaced_deployment(name=deployment, namespace=service_name) 
-                            
-                        for pod in corev1.list_namespaced_pod(namespace=service_name).items: 
-                            corev1.delete_namespaced_pod(name=pod, namespace=service_name) 
+            try:
+                local_service_spec = snowservice.services_spec['local']
+            except:
+                raise AttributeError('Provided spec does not include local docker compose specs.')
 
-                        for service in corev1.list_namespaced_service(namespace=service_name).items: 
-                            if service.metadata.name == service_name:
-                                corev1.delete_namespaced_service(name=service, namespace=service_name) 
-                        
-                        #wait for pods to delete
-                        while True:
-                            if len(corev1.list_namespaced_pod(namespace=service_name).items) > 0:
-                                sleep(2)
-                            else:
-                                break
-
-                        while True:
-                            try:
-                                _ = corev1.delete_namespace(service_name)
-                            except client.ApiException as e:
-                                if json.loads(e.body)['code'] == 404:
-                                    break
-                        return 'success'
-                    except:
-                        return None
-                else: 
-                    print(f"Service {service_name} doesn't exist.")
-                    return None
-                        
-        elif not self.local_test:    
+            try: 
+                docker_compose_kill(local_service_spec=local_service_spec)
+                return 'success'
+            except:
+                return 'failed'
+        
+        else:    
             try: 
                 print(f'DROP SERVICE IF EXISTS {service_name}')
             except: 
                 return None
 
-    def describe_service(self, service_name:str) -> dict:
+    def describe_service(self, service_name:str, service_type: str = None, spec_file_name:str = None):
         # response = {'pods': {}, 'services': {}, 'deployments': {}}
 
         if self.local_test == 'astro_cli':
-            # response['services'][service_name] = {'ingress_url': 'host.docker.internal:8001'}
-            response = {'ingress_url': 'host.docker.internal:8001'}
-            return response
+            snowservice = SnowService(
+                service_name = service_name, 
+                service_type = service_type,
+                spec_file_name = spec_file_name,
+                local_test = self.local_test,
+            )
 
-        elif self.local_test == 'docker_desktop_k8s':
-            from kubernetes import client, config
-            config.load_kube_config()
-                        
-            corev1 = client.CoreV1Api()
-            
-            for namespace in corev1.list_namespace().items:
-                if namespace.metadata.name == service_name:
-                    # response['services'][service_name] = {'ingress_url': 'kubernetes.docker.internal:8001'}
-                    response = {'ingress_url': 'kubernetes.docker.internal:8001'}
-                    return response
-                else:
-                    print('Service does not exist.')
-                    return None
-            
-        elif not self.local_test:  
+            try:
+                local_service_spec = snowservice.services_spec['local']
+            except:
+                raise AttributeError('Provided spec does not include local docker compose specs.')
+
+            try: 
+                result = docker_compose_ps(local_service_spec=local_service_spec)
+                return result
+            except:
+                return None
+
+        else:  
             try:  
                 # response = self.get_conn().cursor().execute(f'CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}').fetchall()
                 print(f"CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}")
@@ -589,12 +622,20 @@ class SnowServicesHook(SnowflakeHook):
             except:
                 return None
             
-    def get_runner_url(self, service_name: str): 
+    def get_runner_url(self, service_name: str, service_type='airflow-runner', spec_file_name:str = None): 
 
-        if self.local_test in ['astro_cli', 'docker_desktop_k8s']:
-            return self.describe_service(service_name=service_name)['ingress_url']
+        if self.local_test == 'astro_cli':
 
-        elif not self.local_test:    
+            snowservice = SnowService(
+                service_name = service_name, 
+                service_type = service_type,
+                spec_file_name = spec_file_name,
+                local_test = self.local_test,
+            )
+            local_port = snowservice.services_spec['local']['services'][service_type]['ports'][0].split(':')[0]
+            return f'http://host.docker.internal:{local_port}'
+
+        else:    
             try:
                 #TODO: what is correct url?
                 #response = self.get_conn().cursor().execute(f'CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}').fetchall()
@@ -602,12 +643,3 @@ class SnowServicesHook(SnowflakeHook):
                 return response
             except:
                 return None
-        
-    def check_service(self, service_name:str):
-
-        service_url = self.get_runner_url(service_name=service_name)
-        response = requests.get(service_url)
-        assert response.status_code == 200
-        assert response.json() == "Pong."
-        print(f'reponse is: {response}')
-        return 'success'
