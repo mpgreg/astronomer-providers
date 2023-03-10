@@ -637,9 +637,10 @@ class SnowServicesHook(SnowflakeHook):
 
         else:    
             try:
-                #TODO: what is correct url?
+                
                 #response = self.get_conn().cursor().execute(f'CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}').fetchall()
-                response = f'http://{service_name}.schema_name.db_name.snowflakecomputing.internal'
+                conn_params = self._get_conn_params()
+                response = f"http://{service_name}.{conn_params['schema']}.{conn_params['database']}.snowflakecomputing.internal"
                 return response
             except:
                 return None
