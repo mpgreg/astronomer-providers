@@ -327,7 +327,7 @@ class SnowServicesHook(SnowflakeHook):
 
             replace_existing_str = ' IF NOT EXISTS ' if not replace_existing else ''
 
-            print(
+            self.run(
                 ' '.join(f"CREATE COMPUTE POOL {replace_existing_str} {pool_name} \
                     MIN_NODES = {min_nodes} \
                     MAX_NODES = {max_nodes} \
@@ -348,7 +348,7 @@ class SnowServicesHook(SnowflakeHook):
         
         if not self.local_test:    
             force_all = 'true' if force_all else 'false'
-            print(
+            self.run(
                 ' '.join(f"ALTER SESSION SET COMPUTE_POOL_FORCE_DELETE_ALL_SNOWSERVICES_ON_DROP = {force_all}; \
                     DROP COMPUTE POOL {pool_name};".split())
             )
@@ -378,7 +378,7 @@ class SnowServicesHook(SnowflakeHook):
                 limit_str = f" LIMIT {limit} "
 
             # response = self.get_conn().cursor().execute(f"SHOW COMPUTE POOLS {like_str} {prefix_str} {limit_str};").fetchall()
-            response = print(f"SHOW COMPUTE POOLS {like_str} {prefix_str} {limit_str};")
+            response = self.run(f"SHOW COMPUTE POOLS {like_str} {prefix_str} {limit_str};")
             return response
         else:
             return None
@@ -474,7 +474,7 @@ class SnowServicesHook(SnowflakeHook):
                 # temp_spec_file_name = f'{temp_stage_name}_spec.yml'                    
 
                 try:
-                    print(
+                    self.run(
                         ' '.join(f"CREATE TEMPORARY STAGE {temp_stage_name}; \
                                 PUT file://{temp_spec_file.as_posix()} @{temp_stage_name} \
                                     AUTO_COMPRESS = False \
@@ -523,7 +523,7 @@ class SnowServicesHook(SnowflakeHook):
             
         else: 
             try:   
-                print(f'ALTER SERVICE IF EXISTS {service_name} SUSPEND')
+                self.run(f'ALTER SERVICE IF EXISTS {service_name} SUSPEND')
                 return 'success'
             except: 
                 return 'failed'
@@ -558,7 +558,7 @@ class SnowServicesHook(SnowflakeHook):
 
         else: 
             try:
-                print(f'ALTER SERVICE IF EXISTS {service_name} RESUME')
+                self.run(f'ALTER SERVICE IF EXISTS {service_name} RESUME')
                 return 'success'
             except:
                 return 'failed'
@@ -587,7 +587,7 @@ class SnowServicesHook(SnowflakeHook):
         
         else:    
             try: 
-                print(f'DROP SERVICE IF EXISTS {service_name}')
+                self.run(f'DROP SERVICE IF EXISTS {service_name}')
             except: 
                 return None
 
@@ -615,8 +615,8 @@ class SnowServicesHook(SnowflakeHook):
 
         else:  
             try:  
-                # response = self.get_conn().cursor().execute(f'CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}').fetchall()
-                print(f"CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}")
+                response = self.get_conn().cursor().execute(f'CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}').fetchall()
+                # print(f"CALL SYSTEM$GET_SNOWSERVICE_STATUS({service_name}")
                 response = {'ingress_url': 'localhost:8001'}
                 return response
             except:
