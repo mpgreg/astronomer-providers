@@ -44,7 +44,7 @@ def create_runner_spec(
     snowservices_spec = {
         'spec': 
         {
-            'containers': 
+            'container': 
             [
                 {
                     'name': service_name, 
@@ -59,18 +59,18 @@ def create_runner_spec(
                     ]
                 }
             ],
-            'volumes': 
-            [
-                # {'name': 'xcom', 'source': 'local'},  
+            # 'volume': 
+            # [
+            #     # {'name': 'xcom', 'source': 'local'},  
+            # ]
+            'endpoint': 
+                [
+                    {
+                        'name': service_name if not runner_endpoint_name else runner_endpoint_name, 
+                        'port': runner_port, 
+                    },    
             ]
-        },
-        'endpoints': 
-            [
-                {
-                    'name': service_name if not runner_endpoint_name else runner_endpoint_name, 
-                    'port': runner_port, 
-                },    
-            ]
+        }
     }
 
     if local_test:

@@ -385,9 +385,10 @@ class SnowServicesPythonOperator(_BasePythonVirtualenvOperator):
     can use a return value.
     
     ##TODO: update docs
-    Task XCOMs will be saved in a Snowflake stage and return values to Airflow (plain xcom) will list 
-    this stage location and filename (ie. @mystage/path/file).
-
+    The runner should use the Snowflake custom XCOM backend (part of this provider) since the Snowservice
+    state cannot be ensured.  Alternatively the local file xcom backend could be used to a volume mounted
+    Snowflake stage.
+    
     :param snowflake_conn_id: connection to use when running code within the Snowservices runner.
     :type snowflake_conn_id: str  (default is snowflake_default)
     :param runner_endpoint: URL endpoint of the instantiated snowservice runner (ie. ws://<hostnam>:<port>/<endpoint>)
